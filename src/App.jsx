@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { RGBELoader } from "three/examples/jsm/loaders/RGBELoader.js";
 import "./App.css";
 
 // ── Shop data (Phnom Penh Locations) ───────────────────────────────────────
@@ -144,22 +145,47 @@ function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion) {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
     renderer.setClearColor(0xffffff, 0);
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+    // Color Management
+    if (renderer.outputColorSpace !== undefined) {
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+    } else {
+      renderer.outputEncoding = 3001; // THREE.sRGBEncoding fallback
+    }
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.15;
 
     const scene = new THREE.Scene();
+
+    // Rotate the studio environment by 90 degrees (Math.PI / 2)
+    if (scene.environmentRotation !== undefined) {
+      scene.environmentRotation.y = Math.PI / 2;
+    }
+
     const camera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clientHeight, 0.1, 100);
     camera.position.set(0, 0, 5);
 
-    const ambient = new THREE.AmbientLight(0xffffff, 0.8); 
+    // HDRI Environment
+    const pmremGenerator = new THREE.PMREMGenerator(renderer);
+    pmremGenerator.compileEquirectangularShader();
+    new RGBELoader().load('/hdr/studio_small_08_1k.hdr', (texture) => {
+      const envMap = pmremGenerator.fromEquirectangular(texture).texture;
+      scene.environment = envMap;
+      texture.dispose();
+      pmremGenerator.dispose();
+    });
+
+    // Lights Setup
+    const ambient = new THREE.AmbientLight(0xffffff, 0.5); 
     scene.add(ambient);
-    const dir = new THREE.DirectionalLight(0xffffff, 1.5); 
-    dir.position.set(5, 5, 5); 
+    const dir = new THREE.DirectionalLight(0xffffff, 2.5); 
+    dir.position.set(5, 6, 4); 
     scene.add(dir);
-    const fillLight = new THREE.DirectionalLight(0xffffff, 0.8); 
-    fillLight.position.set(-3, 0, 5);
+    const fillLight = new THREE.DirectionalLight(0xffffff, 1.2); 
+    fillLight.position.set(-5, 2, 6);
     scene.add(fillLight);
-    const rimLight = new THREE.PointLight(0xa78bfa, 2.0, 12); 
-    rimLight.position.set(-3, 2, -2);
+    const rimLight = new THREE.PointLight(0xa78bfa, 1.5, 12); 
+    rimLight.position.set(-3, 3, -2);
     scene.add(rimLight);
 
     const group = new THREE.Group();
@@ -177,6 +203,26 @@ function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion) {
         
         // Product scale reduced for better viewport fit (~70% of height)
         model.scale.set(1.4, 1.4, 1.4); 
+
+        // Material Tuning
+        model.traverse((child) => {
+          if (child.isMesh && child.material) {
+            const mat = child.material;
+            if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial) {
+              mat.metalness = Math.max(mat.metalness !== undefined ? mat.metalness : 0, 0.7);
+              mat.roughness = Math.min(mat.roughness !== undefined ? mat.roughness : 1, 0.25);
+              mat.envMapIntensity = 1.2;
+              
+              if (mat.map) {
+                if (mat.map.colorSpace !== undefined) {
+                  mat.map.colorSpace = THREE.SRGBColorSpace;
+                } else {
+                  mat.map.encoding = 3001; // THREE.sRGBEncoding
+                }
+              }
+            }
+          }
+        });
         
         group.add(model);
       }, 
@@ -191,7 +237,7 @@ function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion) {
     );
 
     // Particle Count reduced for subtlety
-    const particleCount = 30;
+    const particleCount = 100;
     const pGeo = new THREE.BufferGeometry();
     const positions = new Float32Array(particleCount * 3);
     for (let i = 0; i < particleCount; i++) {
@@ -237,7 +283,7 @@ function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion) {
       let targetY = 0;
       let targetScale = 1;
       let targetCamZ = 5;
-      let targetRimInt = 2.0;
+      let targetRimInt = 1.5;
 
       if (prog < 0.33) {
         targetY = Math.sin(t * 0.8) * 0.08;
@@ -245,7 +291,7 @@ function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion) {
         const spin = (prog - 0.33) / 0.33;
         targetY = Math.sin(t * 0.8) * 0.04;
         targetScale = 1 + spin * 0.08;
-        targetRimInt = 2.0 + spin * 1.0;
+        targetRimInt = 1.5 + spin * 1.0;
         rimLight.color.setHSL(0.75 + spin * 0.1, 0.9, 0.6);
       } else {
         const mapProg = (prog - 0.66) / 0.34;
@@ -253,7 +299,7 @@ function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion) {
         targetY = 0.8 * mapProg + Math.sin(t * 0.8) * 0.04 * (1 - mapProg);
         targetScale = 1.08 - mapProg * 0.55;
         targetCamZ = 5 + mapProg * 1;
-        targetRimInt = 3.0 - mapProg * 1.5;
+        targetRimInt = 2.5 - mapProg * 1.5;
       }
 
       // Apply lerp for smooth transitions

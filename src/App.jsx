@@ -1,6 +1,8 @@
+// FILE: src/App.jsx
 import { useState, useEffect, useRef } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import "./App.css";
 
 // ── Shop data (Phnom Penh Locations) ───────────────────────────────────────
 const SHOPS = [
@@ -43,10 +45,9 @@ const SHOPS = [
 ];
 
 // ── SVG Mini-Map (Google Maps Style) ────────────────────────────────────────
-function MiniMap({ activeShop }) {
+function MiniMap({ activeShop, isActive }) {
   return (
-    <div style={{ width: "100%", height: "100%", position: "relative", background: "#f0fdf4" /* Very light green tint for map base */ }}>
-      
+    <div style={{ width: "100%", height: "100%", position: "relative", background: "#f0fdf4" }}>
       {/* Grid lines / Minor roads */}
       <svg width="100%" height="100%" style={{ position: "absolute", inset: 0, opacity: 0.5 }}>
         {[...Array(15)].map((_, i) => (
@@ -75,7 +76,9 @@ function MiniMap({ activeShop }) {
           position: "absolute",
           left: `${p.x}%`,
           top: `${p.y}%`,
-          transform: "translate(-50%, -100%)",
+          transform: isActive ? "translate(-50%, -100%) scale(1)" : "translate(-50%, -100%) scale(0.5)",
+          opacity: isActive ? 1 : 0,
+          transition: `opacity 0.5s ease ${isActive ? i * 0.15 : 0}s, transform 0.5s cubic-bezier(0.34,1.56,0.64,1) ${isActive ? i * 0.15 : 0}s`,
           zIndex: activeShop === i ? 20 : 10,
         }}>
           {/* Map Label */}
@@ -102,7 +105,7 @@ function MiniMap({ activeShop }) {
           <div style={{
             width: activeShop === i ? 28 : 22,
             height: activeShop === i ? 28 : 22,
-            background: activeShop === i ? "#111827" : "#3b82f6", // Black if active, Blue if inactive
+            background: activeShop === i ? "#111827" : "#3b82f6", 
             borderRadius: "50% 50% 50% 0",
             transform: "rotate(-45deg)",
             display: "flex",
@@ -112,7 +115,6 @@ function MiniMap({ activeShop }) {
             boxShadow: activeShop === i ? "0 8px 16px rgba(0,0,0,0.3)" : "0 4px 8px rgba(0,0,0,0.15)",
             transition: "all 0.3s cubic-bezier(0.34,1.56,0.64,1)",
           }}>
-            {/* Inner white dot */}
             <div style={{
               width: activeShop === i ? 10 : 6,
               height: activeShop === i ? 10 : 6,
@@ -128,7 +130,7 @@ function MiniMap({ activeShop }) {
 }
 
 // ── Three.js product renderer ───────────────────────────────────────────────
-function useThreeScene(canvasRef, scrollProgress) {
+function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion) {
   const sceneRef = useRef(null);
   const startedRef = useRef(false);
 
@@ -138,57 +140,58 @@ function useThreeScene(canvasRef, scrollProgress) {
     
     const canvas = canvasRef.current;
     
-    // Setup Renderer
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
     renderer.setClearColor(0xffffff, 0);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clientHeight, 0.1, 100);
     camera.position.set(0, 0, 5);
 
-    // Lights
-    const ambient = new THREE.AmbientLight(0xffffff, 2.0); 
+    const ambient = new THREE.AmbientLight(0xffffff, 0.8); 
     scene.add(ambient);
-    const dir = new THREE.DirectionalLight(0xffffff, 5.0); 
+    const dir = new THREE.DirectionalLight(0xffffff, 1.5); 
     dir.position.set(5, 5, 5); 
     scene.add(dir);
-    const fillLight = new THREE.DirectionalLight(0xffffff, 2.5); 
+    const fillLight = new THREE.DirectionalLight(0xffffff, 0.8); 
     fillLight.position.set(-3, 0, 5);
     scene.add(fillLight);
-    const rimLight = new THREE.PointLight(0xa78bfa, 3, 12); 
+    const rimLight = new THREE.PointLight(0xa78bfa, 2.0, 12); 
     rimLight.position.set(-3, 2, -2);
     scene.add(rimLight);
 
-    // Custom GLTF Model
     const group = new THREE.Group();
     scene.add(group);
 
     const loader = new GLTFLoader();
-    loader.load('/product.glb', (gltf) => {
-      const model = gltf.scene;
-      
-      model.traverse((child) => {
-        if (child.isMesh && child.material) {
-          child.material.metalness = 0.6; 
-          child.material.roughness = 0.2; 
-          child.material.needsUpdate = true;
-        }
-      });
+    loader.load(
+      '/product.glb', 
+      (gltf) => {
+        const model = gltf.scene;
+        
+        const box = new THREE.Box3().setFromObject(model);
+        const center = box.getCenter(new THREE.Vector3());
+        model.position.sub(center);
+        
+        // Product scale reduced for better viewport fit (~70% of height)
+        model.scale.set(1.4, 1.4, 1.4); 
+        
+        group.add(model);
+      }, 
+      undefined, 
+      (error) => {
+        console.error('Error loading product.glb, using fallback mesh:', error);
+        const fallbackGeo = new THREE.CapsuleGeometry(0.5, 0.8, 4, 16);
+        const fallbackMat = new THREE.MeshStandardMaterial({ color: 0x111827 });
+        const fallbackMesh = new THREE.Mesh(fallbackGeo, fallbackMat);
+        group.add(fallbackMesh);
+      }
+    );
 
-      const box = new THREE.Box3().setFromObject(model);
-      const center = box.getCenter(new THREE.Vector3());
-      model.position.sub(center);
-      model.scale.set(1, 1, 1); 
-      
-      group.add(model);
-    }, undefined, (error) => {
-      console.error('Error loading model:', error);
-    });
-
-    // Floating particles (Black)
-    const particleCount = 60;
+    // Particle Count reduced for subtlety
+    const particleCount = 30;
     const pGeo = new THREE.BufferGeometry();
     const positions = new Float32Array(particleCount * 3);
     for (let i = 0; i < particleCount; i++) {
@@ -219,34 +222,61 @@ function useThreeScene(canvasRef, scrollProgress) {
       t += 0.01;
 
       const prog = scrollProgress.current || 0;
+      const d = dragRef.current;
+
+      if (!d.dragActive && !reducedMotion) {
+        d.rotOffsetX += d.velY;
+        d.rotOffsetY += d.velX;
+        d.velX *= 0.92;
+        d.velY *= 0.92;
+      }
+      d.rotOffsetX = Math.max(-0.35, Math.min(0.35, d.rotOffsetX));
+
+      // Calculate smooth target locations using Lerp
+      let targetX = 0;
+      let targetY = 0;
+      let targetScale = 1;
+      let targetCamZ = 5;
+      let targetRimInt = 2.0;
 
       if (prog < 0.33) {
-        group.position.x = 0;
-        group.position.y = Math.sin(t * 0.8) * 0.08;
-        group.rotation.y = t * 0.3;
-        group.scale.setScalar(1);
-        group.position.z = 0;
-        camera.position.z = 5;
-        rimLight.intensity = 3;
+        targetY = Math.sin(t * 0.8) * 0.08;
       } else if (prog < 0.66) {
         const spin = (prog - 0.33) / 0.33;
-        group.rotation.y = t * 0.3 + spin * Math.PI * 2;
-        group.position.x = 0;
-        group.position.y = Math.sin(t * 0.8) * 0.04;
-        group.scale.setScalar(1 + spin * 0.08);
-        group.position.z = 0;
-        camera.position.z = 5;
-        rimLight.intensity = 3 + spin * 1.5;
+        targetY = Math.sin(t * 0.8) * 0.04;
+        targetScale = 1 + spin * 0.08;
+        targetRimInt = 2.0 + spin * 1.0;
         rimLight.color.setHSL(0.75 + spin * 0.1, 0.9, 0.6);
       } else {
         const mapProg = (prog - 0.66) / 0.34;
-        group.position.x = -1.5 * mapProg;
-        group.position.y = 0.8 * mapProg + Math.sin(t * 0.8) * 0.04 * (1 - mapProg);
-        group.scale.setScalar(1.08 - mapProg * 0.55);
-        group.rotation.y = t * 0.3;
-        camera.position.z = 5 + mapProg * 1;
-        rimLight.intensity = 4.5 - mapProg * 2;
+        targetX = -1.5 * mapProg;
+        targetY = 0.8 * mapProg + Math.sin(t * 0.8) * 0.04 * (1 - mapProg);
+        targetScale = 1.08 - mapProg * 0.55;
+        targetCamZ = 5 + mapProg * 1;
+        targetRimInt = 3.0 - mapProg * 1.5;
       }
+
+      // Apply lerp for smooth transitions
+      const lerpSpeed = reducedMotion ? 1.0 : 0.08;
+      group.position.x = THREE.MathUtils.lerp(group.position.x, targetX, lerpSpeed);
+      group.position.y = THREE.MathUtils.lerp(group.position.y, targetY, lerpSpeed);
+      group.scale.setScalar(THREE.MathUtils.lerp(group.scale.x, targetScale, lerpSpeed));
+      camera.position.z = THREE.MathUtils.lerp(camera.position.z, targetCamZ, lerpSpeed);
+      rimLight.intensity = THREE.MathUtils.lerp(rimLight.intensity, targetRimInt, lerpSpeed);
+
+      // Handle custom rotation via explicit offset lerping to avoid snapping
+      let targetSpinOffset = 0;
+      if (prog >= 0.33 && prog < 0.66) {
+        const spin = (prog - 0.33) / 0.33;
+        const spinFactor = d.dragActive ? 0.2 : 1.0;
+        targetSpinOffset = spin * Math.PI * 2 * spinFactor;
+      }
+      
+      if (d.currentSpinOffset === undefined) d.currentSpinOffset = 0;
+      d.currentSpinOffset = THREE.MathUtils.lerp(d.currentSpinOffset, targetSpinOffset, lerpSpeed);
+
+      group.rotation.y = t * 0.3 + d.currentSpinOffset + d.rotOffsetY;
+      group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, d.rotOffsetX, lerpSpeed);
 
       particles.rotation.y += 0.001;
       particles.rotation.x += 0.0005;
@@ -258,38 +288,61 @@ function useThreeScene(canvasRef, scrollProgress) {
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", onResize);
-      renderer.dispose();
       
       group.traverse((child) => {
         if (child.isMesh) {
-          child.geometry.dispose();
-          if (child.material.isMaterial) {
-            child.material.dispose();
-          } else if (Array.isArray(child.material)) {
-            child.material.forEach(mat => mat.dispose());
+          if (child.geometry) child.geometry.dispose();
+          if (child.material) {
+            if (Array.isArray(child.material)) {
+              child.material.forEach(mat => mat.dispose());
+            } else {
+              child.material.dispose();
+            }
           }
         }
       });
       
-      pGeo.dispose();
-      pMat.dispose();
+      if (pGeo) pGeo.dispose();
+      if (pMat) pMat.dispose();
+      renderer.dispose();
       startedRef.current = false;
     };
-  }, []);
+  }, [reducedMotion]);
 }
 
 // ── Main App ────────────────────────────────────────────────────────────────
 export default function App() {
   const scrollRef = useRef(null);
   const canvasRef = useRef(null);
+  const interactRef = useRef(null);
+  
   const scrollProgress = useRef(0);
   const [chapter, setChapter] = useState(0);
   const [activeShop, setActiveShop] = useState(0);
+  const [showHint, setShowHint] = useState(true);
+
   const [reducedMotion] = useState(() =>
     typeof window !== "undefined" ? window.matchMedia("(prefers-reduced-motion: reduce)").matches : false
   );
 
-  useThreeScene(canvasRef, scrollProgress);
+  const dragRef = useRef({
+    dragActive: false,
+    lastX: 0,
+    lastY: 0,
+    rotOffsetX: 0,
+    rotOffsetY: 0,
+    velX: 0,
+    velY: 0,
+    lastTap: 0
+  });
+
+  useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion);
+
+  // Auto-hide product interaction hint
+  useEffect(() => {
+    const timer = setTimeout(() => setShowHint(false), 3000);
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     const container = scrollRef.current;
@@ -307,7 +360,6 @@ export default function App() {
       } else {
         setChapter(2);
         const mapProg = (prog - 0.66) / 0.34;
-        // Dynamically calculate active shop based on scroll depth in chapter 3
         setActiveShop(Math.min(SHOPS.length - 1, Math.floor(mapProg * SHOPS.length)));
       }
     };
@@ -316,49 +368,152 @@ export default function App() {
     return () => container.removeEventListener("scroll", onScroll);
   }, []);
 
+  const handlePointerDown = (e) => {
+    const ww = window.innerWidth;
+    const wh = window.innerHeight;
+    
+    const minX = ww * 0.2;
+    const maxX = ww * 0.8;
+    const minY = wh * 0.2;
+    const maxY = wh * 0.8;
+
+    if (e.clientX >= minX && e.clientX <= maxX && e.clientY >= minY && e.clientY <= maxY) {
+      const d = dragRef.current;
+      d.dragActive = true;
+      d.lastX = e.clientX;
+      d.lastY = e.clientY;
+      d.velX = 0;
+      d.velY = 0;
+      
+      if (interactRef.current) {
+        interactRef.current.setPointerCapture(e.pointerId);
+      }
+
+      const now = Date.now();
+      if (now - d.lastTap < 300) {
+        d.rotOffsetX = 0;
+        d.rotOffsetY = 0;
+      }
+      d.lastTap = now;
+      
+      setShowHint(false); // Hide hint once user interacts
+    }
+  };
+
+  const handlePointerMove = (e) => {
+    const d = dragRef.current;
+    if (!d.dragActive) return;
+    
+    if (e.cancelable) {
+      e.preventDefault();
+    }
+
+    const deltaX = e.clientX - d.lastX;
+    const deltaY = e.clientY - d.lastY;
+    const speed = 0.005;
+
+    d.rotOffsetY += deltaX * speed;
+    d.rotOffsetX += deltaY * speed;
+    
+    d.velX = deltaX * speed * 0.5;
+    d.velY = deltaY * speed * 0.5;
+
+    d.lastX = e.clientX;
+    d.lastY = e.clientY;
+  };
+
+  const handlePointerUp = (e) => {
+    const d = dragRef.current;
+    if (!d.dragActive) return;
+    d.dragActive = false;
+    
+    if (interactRef.current) {
+      try {
+        interactRef.current.releasePointerCapture(e.pointerId);
+      } catch (err) { }
+    }
+  };
+
   const shop = SHOPS[activeShop] || SHOPS[0];
 
   return (
     <div style={{ width: "100%", height: "100vh", background: "#ffffff", fontFamily: "'Segoe UI', system-ui, sans-serif", overflow: "hidden", position: "relative" }}>
 
-      {/* ── Scrollable chapters ─────────────────────────────────────── */}
       <div ref={scrollRef} style={{ position: "absolute", inset: 0, overflowY: "scroll", zIndex: 10, pointerEvents: "auto", WebkitOverflowScrolling: "touch" }}>
-        <div style={{ height: "300vh", pointerEvents: "none" }} />
+        <div 
+          ref={interactRef}
+          style={{
+            position: "sticky", 
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100vh",
+            zIndex: 15, 
+            pointerEvents: chapter === 2 ? "none" : "auto", 
+            touchAction: "pan-y" 
+          }}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+        />
+        <div style={{ height: "200vh", pointerEvents: "none" }} />
       </div>
 
-      {/* ── Sticky Canvas (behind) ──────────────────────────────────── */}
       <canvas ref={canvasRef} style={{
         position: "absolute", inset: 0,
         width: "100%", height: "100%",
         zIndex: 1, pointerEvents: "none",
       }} />
 
-      {/* ── Background gradient (Light Theme) ───────────────────────── */}
       <div style={{
         position: "absolute", inset: 0, zIndex: 0,
         background: chapter === 0
           ? "radial-gradient(ellipse at 60% 40%, #f3f4f6 0%, #ffffff 70%)"
           : chapter === 1
           ? "radial-gradient(ellipse at 40% 50%, #e5e7eb 0%, #ffffff 70%)"
-          : "radial-gradient(ellipse at 50% 50%, #ffffff 0%, #ffffff 100%)", // Flat white for map base
+          : "radial-gradient(ellipse at 50% 50%, #ffffff 0%, #ffffff 100%)",
         transition: "background 1.2s ease",
         pointerEvents: "none",
       }} />
 
-      {/* ── Map layer (Chapter 3) ───────────────────────────────────── */}
       <div style={{
         position: "absolute", inset: 0, zIndex: 2,
         opacity: chapter === 2 ? 1 : 0,
         transition: "opacity 0.8s ease",
         pointerEvents: chapter === 2 ? "auto" : "none",
       }}>
-        <MiniMap activeShop={activeShop} />
+        <MiniMap activeShop={activeShop} isActive={chapter === 2} />
       </div>
 
-      {/* ── DOM Overlay ─────────────────────────────────────────────── */}
+      {/* Persistent UI Layer */}
       <div style={{ position: "absolute", inset: 0, zIndex: 20, pointerEvents: "none" }}>
 
-        {/* — Chapter 1: Hero — */}
+        {/* Story Progress Indicator */}
+        <div style={{ position: "absolute", right: 24, top: "50%", transform: "translateY(-50%)", zIndex: 40, display: "flex", flexDirection: "column", gap: 12 }}>
+          {[0, 1, 2].map(i => (
+            <div key={i} style={{
+              width: 8, height: 8, borderRadius: "50%",
+              background: chapter === i ? "#7c3aed" : "#cbd5e1",
+              transform: `scale(${chapter === i ? 1.5 : 1})`,
+              transition: "all 0.4s cubic-bezier(0.34,1.56,0.64,1)"
+            }} />
+          ))}
+        </div>
+
+        {/* Drag Interaction Hint */}
+        <div style={{
+          position: "absolute", top: "55%", left: "50%", transform: "translate(-50%, -50%)",
+          opacity: chapter === 0 && showHint ? 1 : 0, transition: "opacity 0.8s ease",
+          pointerEvents: "none", zIndex: 30
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.9)', padding: '8px 16px', borderRadius: 20, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
+            <span style={{ fontSize: 16 }}>⟷</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: '#111827', letterSpacing: 1 }}>DRAG TO ROTATE</span>
+          </div>
+        </div>
+
+        {/* Chapter 0 Content */}
         <div style={{
           position: "absolute", inset: 0, display: "flex", flexDirection: "column",
           justifyContent: "flex-end", alignItems: "center",
@@ -368,6 +523,9 @@ export default function App() {
           transition: "opacity 0.7s ease, transform 0.7s ease",
         }}>
           <div style={{ textAlign: "center", maxWidth: 360 }}>
+            {/* Chapter Label */}
+            <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 2, color: "#64748b", marginBottom: 16 }}>INTRODUCING</div>
+            
             <div style={{
               display: "inline-block", background: "rgba(167,139,250,0.1)",
               border: "1px solid rgba(167,139,250,0.3)", borderRadius: 20,
@@ -387,7 +545,18 @@ export default function App() {
           </div>
         </div>
 
-        {/* — Chapter 2: Product info — */}
+        {/* Scroll Indicator */}
+        <div style={{
+          position: "absolute", bottom: "4vh", left: "50%", transform: "translateX(-50%)",
+          opacity: chapter === 0 ? 1 : 0, transition: "opacity 0.5s ease", zIndex: 30
+        }}>
+          <div className="animate-bounce-subtle" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, color: "#64748b", fontSize: 10, fontWeight: 700, letterSpacing: 1 }}>
+            <span style={{ fontSize: 14 }}>↓</span>
+            <span>SCROLL TO EXPLORE</span>
+          </div>
+        </div>
+
+        {/* Chapter 1 Content */}
         <div style={{
           position: "absolute", inset: 0, display: "flex", flexDirection: "column",
           justifyContent: "flex-end", alignItems: "flex-start",
@@ -397,6 +566,9 @@ export default function App() {
           transition: "opacity 0.7s ease, transform 0.7s ease",
         }}>
           <div style={{ maxWidth: 300 }}>
+            {/* Chapter Label */}
+            <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 2, color: "#64748b", marginBottom: 16 }}>THE FORMULA</div>
+            
             <div style={{ color: "#7c3aed", fontSize: 11, fontWeight: 800, letterSpacing: 2, textTransform: "uppercase", marginBottom: 10 }}>Signature Formula</div>
             <h2 style={{ margin: "0 0 14px", fontSize: "clamp(24px, 6vw, 36px)", fontWeight: 800, color: "#111827", lineHeight: 1.1 }}>
               Hydra-Repair<br />Serum Pro
@@ -429,7 +601,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* — Chapter 3: Map UI Card (Matches Screenshot 3 exactly) — */}
+        {/* Chapter 2 Content */}
         <div style={{
           position: "absolute",
           left: "5%",
@@ -447,8 +619,9 @@ export default function App() {
           display: "flex",
           flexDirection: "column",
         }}>
+          {/* Chapter Label */}
+          <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 2, color: "#64748b", marginBottom: 16 }}>STORE LOCATIONS</div>
           
-          {/* Back Button */}
           <div style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer", marginBottom: 24, width: "fit-content" }}>
             <div style={{ width: 24, height: 24, borderRadius: "50%", border: "1px solid #e2e8f0", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "#64748b" }}>
               -
@@ -456,7 +629,6 @@ export default function App() {
             <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1.5, color: "#64748b" }}>BACK TO LIST</div>
           </div>
 
-          {/* Header Info */}
           <h2 style={{ fontSize: 24, fontWeight: 300, margin: "0 0 12px 0", letterSpacing: 2, color: "#111827", fontFamily: "Times New Roman, serif" }}>
             {shop.name.toUpperCase()}
           </h2>
@@ -473,7 +645,6 @@ export default function App() {
 
           <hr style={{ border: "none", borderTop: "1px solid #f1f5f9", margin: "0 0 24px 0" }} />
 
-          {/* Contact & Location */}
           <div style={{ display: "flex", flexDirection: "column", gap: 20, marginBottom: 24 }}>
             <div style={{ display: "flex", alignItems: "flex-start", gap: 16 }}>
               <span style={{ fontSize: 18 }}>📍</span>
@@ -495,7 +666,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* Black Call To Action */}
           <button style={{
             width: "100%",
             background: "#111827",
@@ -516,7 +686,6 @@ export default function App() {
           </button>
         </div>
 
-        {/* ── Progress bar ───────────────────────────────────────── */}
         <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: "rgba(0,0,0,0.05)" }}>
           <div style={{
             height: "100%",
@@ -526,7 +695,6 @@ export default function App() {
           }} />
         </div>
 
-        {/* ── Top nav ────────────────────────────────────────────── */}
         <div style={{
           position: "absolute", top: 0, left: 0, right: 0,
           display: "flex", justifyContent: "space-between", alignItems: "center",

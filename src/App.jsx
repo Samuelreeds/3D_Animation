@@ -1,4 +1,3 @@
-// FILE: src/App.jsx
 import { useState, useEffect, useRef } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
@@ -131,7 +130,7 @@ function MiniMap({ activeShop, isActive }) {
 }
 
 // ── Three.js product renderer ───────────────────────────────────────────────
-function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion) {
+function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion, threeContext) {
   const sceneRef = useRef(null);
   const startedRef = useRef(false);
 
@@ -191,50 +190,128 @@ function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion) {
     const group = new THREE.Group();
     scene.add(group);
 
-    const loader = new GLTFLoader();
-    loader.load(
-      '/product.glb', 
-      (gltf) => {
-        const model = gltf.scene;
-        
-        const box = new THREE.Box3().setFromObject(model);
-        const center = box.getCenter(new THREE.Vector3());
-        model.position.sub(center);
-        
-        // Product scale reduced for better viewport fit (~70% of height)
-        model.scale.set(1.4, 1.4, 1.4); 
+    // Raycaster Setup for Tap-To-Open
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
 
-        // Material Tuning
-        model.traverse((child) => {
-          if (child.isMesh && child.material) {
-            const mat = child.material;
-            if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial) {
-              mat.metalness = Math.max(mat.metalness !== undefined ? mat.metalness : 0, 0.7);
-              mat.roughness = Math.min(mat.roughness !== undefined ? mat.roughness : 1, 0.25);
-              mat.envMapIntensity = 1.2;
-              
-              if (mat.map) {
-                if (mat.map.colorSpace !== undefined) {
-                  mat.map.colorSpace = THREE.SRGBColorSpace;
-                } else {
-                  mat.map.encoding = 3001; // THREE.sRGBEncoding
-                }
-              }
+    if (threeContext) {
+      threeContext.current.raycastTap = (clientX, clientY) => {
+        const rect = canvas.getBoundingClientRect();
+        pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+        pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+
+        raycaster.setFromCamera(pointer, camera);
+
+        const prog = scrollProgress.current || 0;
+        let activeIndex = 0;
+        if (prog < 0.33) activeIndex = 0;
+        else if (prog < 0.66) activeIndex = 1;
+        else activeIndex = 2;
+
+        if (sceneRef.current && sceneRef.current.products && sceneRef.current.products.length > 0) {
+          // Use product 2 for section 2 and 3
+          const modelIndex = activeIndex === 0 ? 0 : 1;
+          const activeProduct = sceneRef.current.products[modelIndex];
+
+          if (activeProduct && activeProduct.cap) {
+            const intersects = raycaster.intersectObject(activeProduct.wrapper, true);
+            if (intersects.length > 0) {
+              activeProduct.wrapper.userData.isOpen = !activeProduct.wrapper.userData.isOpen;
             }
           }
-        });
-        
-        group.add(model);
-      }, 
-      undefined, 
-      (error) => {
-        console.error('Error loading product.glb, using fallback mesh:', error);
-        const fallbackGeo = new THREE.CapsuleGeometry(0.5, 0.8, 4, 16);
-        const fallbackMat = new THREE.MeshStandardMaterial({ color: 0x111827 });
-        const fallbackMesh = new THREE.Mesh(fallbackGeo, fallbackMat);
-        group.add(fallbackMesh);
+        }
+      };
+    }
+
+    const loader = new GLTFLoader();
+    
+    // Define exact paths for your products
+    const productPaths = ['/product.glb', '/product2.glb'];
+    
+    Promise.all(productPaths.map((path, index) => {
+      return new Promise((resolve) => {
+        loader.load(
+          path, 
+          (gltf) => {
+            const model = gltf.scene;
+            const nodes = {};
+            
+            model.traverse((child) => {
+              if (child.name) nodes[child.name] = child;
+            });
+            
+            console.log(`[BARE-3D] Loaded ${path}. Available nodes:`, Object.keys(nodes));
+            
+            const box = new THREE.Box3().setFromObject(model);
+            const center = box.getCenter(new THREE.Vector3());
+            model.position.sub(center);
+            
+            // Material Tuning
+            model.traverse((child) => {
+              if (child.isMesh && child.material) {
+                const mat = child.material;
+                if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial) {
+                  mat.metalness = Math.max(mat.metalness !== undefined ? mat.metalness : 0, 0.7);
+                  mat.roughness = Math.min(mat.roughness !== undefined ? mat.roughness : 1, 0.25);
+                  mat.envMapIntensity = 1.2;
+                  
+                  if (mat.map) {
+                    if (mat.map.colorSpace !== undefined) {
+                      mat.map.colorSpace = THREE.SRGBColorSpace;
+                    } else {
+                      mat.map.encoding = 3001; // THREE.sRGBEncoding
+                    }
+                  }
+                }
+              }
+            });
+
+            // Dynamic cap discovery as fallback if strict nodes are missing
+            let cap = nodes["Cap.001"] || nodes["Cap"] || nodes["cap"] || nodes["Lid"];
+            if (!cap) {
+              model.traverse((child) => {
+                if (child.isMesh && (child.name.toLowerCase().includes('cap') || child.name.toLowerCase().includes('lid'))) {
+                  cap = child;
+                }
+              });
+            }
+            
+            if (cap) {
+              cap.userData.originalY = cap.position.y;
+            }
+
+            const wrapper = new THREE.Group();
+            wrapper.userData.isOpen = false;
+            wrapper.add(model);
+            wrapper.scale.setScalar(0);
+            wrapper.position.y = -2;
+            group.add(wrapper);
+            
+            resolve({ index, wrapper, cap });
+          }, 
+          undefined, 
+          (error) => {
+            console.error(`Error loading ${path}, using fallback mesh:`, error);
+            const fallbackGeo = new THREE.CapsuleGeometry(0.5, 0.8, 4, 16);
+            const fallbackMat = new THREE.MeshStandardMaterial({ color: 0x111827 });
+            const fallbackMesh = new THREE.Mesh(fallbackGeo, fallbackMat);
+            fallbackMesh.scale.setScalar(0);
+            fallbackMesh.position.y = -2;
+            const wrapper = new THREE.Group();
+            wrapper.userData.isOpen = false;
+            wrapper.add(fallbackMesh);
+            group.add(wrapper);
+            resolve({ index, wrapper, cap: null });
+          }
+        );
+      });
+    })).then((results) => {
+      // Sort to ensure the order matches chapter 0, 1
+      results.sort((a, b) => a.index - b.index);
+      if (sceneRef.current) {
+        sceneRef.current.products = results;
       }
-    );
+    });
 
     // Particle Count reduced for subtlety
     const particleCount = 100;
@@ -250,7 +327,7 @@ function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion) {
     const particles = new THREE.Points(pGeo, pMat);
     scene.add(particles);
 
-    sceneRef.current = { renderer, scene, camera, group, particles, rimLight };
+    sceneRef.current = { renderer, scene, camera, group, particles, rimLight, products: [] };
 
     const onResize = () => {
       const w2 = canvas.clientWidth;
@@ -278,41 +355,99 @@ function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion) {
       }
       d.rotOffsetX = Math.max(-0.35, Math.min(0.35, d.rotOffsetX));
 
-      // Calculate smooth target locations using Lerp
+      // Determine active section index
+      let activeIndex = 0;
+      if (prog < 0.33) activeIndex = 0;
+      else if (prog < 0.66) activeIndex = 1;
+      else activeIndex = 2;
+
+      // Base targets
       let targetX = 0;
-      let targetY = 0;
-      let targetScale = 1;
       let targetCamZ = 5;
       let targetRimInt = 1.5;
 
-      if (prog < 0.33) {
-        targetY = Math.sin(t * 0.8) * 0.08;
-      } else if (prog < 0.66) {
+      if (activeIndex === 1) {
         const spin = (prog - 0.33) / 0.33;
-        targetY = Math.sin(t * 0.8) * 0.04;
-        targetScale = 1 + spin * 0.08;
         targetRimInt = 1.5 + spin * 1.0;
         rimLight.color.setHSL(0.75 + spin * 0.1, 0.9, 0.6);
-      } else {
-        const mapProg = (prog - 0.66) / 0.34;
+      } else if (activeIndex === 2) {
+        const mapProg = Math.min(1, (prog - 0.66) / 0.34);
         targetX = -1.5 * mapProg;
-        targetY = 0.8 * mapProg + Math.sin(t * 0.8) * 0.04 * (1 - mapProg);
-        targetScale = 1.08 - mapProg * 0.55;
         targetCamZ = 5 + mapProg * 1;
         targetRimInt = 2.5 - mapProg * 1.5;
+        rimLight.color.setHSL(0.75, 0.9, 0.6);
+      } else {
+        rimLight.color.setHSL(0.75, 0.9, 0.6);
       }
 
       // Apply lerp for smooth transitions
       const lerpSpeed = reducedMotion ? 1.0 : 0.08;
       group.position.x = THREE.MathUtils.lerp(group.position.x, targetX, lerpSpeed);
-      group.position.y = THREE.MathUtils.lerp(group.position.y, targetY, lerpSpeed);
-      group.scale.setScalar(THREE.MathUtils.lerp(group.scale.x, targetScale, lerpSpeed));
       camera.position.z = THREE.MathUtils.lerp(camera.position.z, targetCamZ, lerpSpeed);
       rimLight.intensity = THREE.MathUtils.lerp(rimLight.intensity, targetRimInt, lerpSpeed);
 
+      // Handle products pop up / switch
+      if (sceneRef.current && sceneRef.current.products && sceneRef.current.products.length > 0) {
+        sceneRef.current.products.forEach((prod, i) => {
+          // Section 1: product 1 (index 0)
+          // Section 2 & 3: product 2 (index 1)
+          const isActiveModel = (activeIndex === 0 && i === 0) || (activeIndex > 0 && i === 1);
+
+          let pTargetScale = 0;
+          let pTargetY = -2;
+          let capTargetY = prod.cap ? prod.cap.userData.originalY : 0;
+          let targetRotZ = 0;
+
+          if (isActiveModel) {
+             pTargetY = Math.sin(t * 0.8) * 0.08;
+
+             if (activeIndex === 0) {
+                 pTargetScale = 1.4;
+             } else if (activeIndex === 1) {
+                 const spin = (prog - 0.33) / 0.33;
+                 pTargetScale = 1.4 + spin * 0.08;
+                 
+                 // Handle auto-separation OR interactive opening
+                 if (prod.cap) {
+                    if (prod.wrapper.userData.isOpen) {
+                        capTargetY = prod.cap.userData.originalY + 0.8;
+                    } else {
+                        capTargetY = prod.cap.userData.originalY; 
+                    }
+                 }
+             } else if (activeIndex === 2) {
+                 const mapProg = Math.min(1, (prog - 0.66) / 0.34);
+                 pTargetScale = 1.4 - mapProg * 0.55;
+                 pTargetY = 0.8 * mapProg + Math.sin(t * 0.8) * 0.04 * (1 - mapProg);
+                 if (prod.cap) {
+                     if (prod.wrapper.userData.isOpen) {
+                        capTargetY = prod.cap.userData.originalY + 1.2 * mapProg;
+                     } else {
+                        capTargetY = prod.cap.userData.originalY;
+                     }
+                 }
+                 targetRotZ = 0.15 * mapProg;
+             }
+          }
+
+          prod.wrapper.scale.setScalar(THREE.MathUtils.lerp(prod.wrapper.scale.x, pTargetScale, lerpSpeed));
+          prod.wrapper.position.y = THREE.MathUtils.lerp(prod.wrapper.position.y, pTargetY, lerpSpeed);
+          
+          if (isActiveModel) {
+              prod.wrapper.rotation.z = THREE.MathUtils.lerp(prod.wrapper.rotation.z, targetRotZ, lerpSpeed);
+          } else {
+              prod.wrapper.rotation.z = THREE.MathUtils.lerp(prod.wrapper.rotation.z, 0, lerpSpeed);
+          }
+
+          if (prod.cap) {
+            prod.cap.position.y = THREE.MathUtils.lerp(prod.cap.position.y, capTargetY, lerpSpeed * 1.5);
+          }
+        });
+      }
+
       // Handle custom rotation via explicit offset lerping to avoid snapping
       let targetSpinOffset = 0;
-      if (prog >= 0.33 && prog < 0.66) {
+      if (activeIndex === 1) {
         const spin = (prog - 0.33) / 0.33;
         const spinFactor = d.dragActive ? 0.2 : 1.0;
         targetSpinOffset = spin * Math.PI * 2 * spinFactor;
@@ -353,7 +488,7 @@ function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion) {
       renderer.dispose();
       startedRef.current = false;
     };
-  }, [reducedMotion]);
+  }, [reducedMotion, threeContext]);
 }
 
 // ── Main App ────────────────────────────────────────────────────────────────
@@ -361,6 +496,7 @@ export default function App() {
   const scrollRef = useRef(null);
   const canvasRef = useRef(null);
   const interactRef = useRef(null);
+  const threeContext = useRef({});
   
   const scrollProgress = useRef(0);
   const [chapter, setChapter] = useState(0);
@@ -379,14 +515,17 @@ export default function App() {
     rotOffsetY: 0,
     velX: 0,
     velY: 0,
-    lastTap: 0
+    lastTap: 0,
+    tapStartX: 0,
+    tapStartY: 0,
+    tapStartTime: 0
   });
 
-  useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion);
+  useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion, threeContext);
 
   // Auto-hide product interaction hint
   useEffect(() => {
-    const timer = setTimeout(() => setShowHint(false), 3000);
+    const timer = setTimeout(() => setShowHint(false), 5000);
     return () => clearTimeout(timer);
   }, []);
 
@@ -431,6 +570,11 @@ export default function App() {
       d.velX = 0;
       d.velY = 0;
       
+      // Store potential tap start
+      d.tapStartX = e.clientX;
+      d.tapStartY = e.clientY;
+      d.tapStartTime = Date.now();
+      
       if (interactRef.current) {
         interactRef.current.setPointerCapture(e.pointerId);
       }
@@ -472,6 +616,18 @@ export default function App() {
     const d = dragRef.current;
     if (!d.dragActive) return;
     d.dragActive = false;
+    
+    // Check if it was a quick tap without much movement
+    if (d.tapStartTime) {
+      const duration = Date.now() - d.tapStartTime;
+      const dist = Math.hypot(e.clientX - d.tapStartX, e.clientY - d.tapStartY);
+      
+      if (duration < 300 && dist < 10) {
+        if (threeContext.current.raycastTap) {
+          threeContext.current.raycastTap(e.clientX, e.clientY);
+        }
+      }
+    }
     
     if (interactRef.current) {
       try {
@@ -554,8 +710,8 @@ export default function App() {
           pointerEvents: "none", zIndex: 30
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.9)', padding: '8px 16px', borderRadius: 20, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
-            <span style={{ fontSize: 16 }}>⟷</span>
-            <span style={{ fontSize: 11, fontWeight: 700, color: '#111827', letterSpacing: 1 }}>DRAG TO ROTATE</span>
+            <span style={{ fontSize: 16 }}>⟷👆</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: '#111827', letterSpacing: 1 }}>DRAG OR TAP</span>
           </div>
         </div>
 
@@ -584,7 +740,7 @@ export default function App() {
               background: "linear-gradient(135deg, #111827 40%, #7c3aed)",
               WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
               letterSpacing: -1,
-            }}>Welcome to<br />NovaCare</h1>
+            }}>Welcome to<br />BARE</h1>
             <p style={{ color: "#4b5563", fontSize: 14, lineHeight: 1.6, margin: "0 0 24px" }}>
               Science-backed skincare, crafted for every skin story.
             </p>
@@ -751,7 +907,7 @@ export default function App() {
             fontSize: 16, fontWeight: 800, letterSpacing: -0.5,
             background: "linear-gradient(135deg, #111827, #7c3aed)",
             WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
-          }}>NOVA<span style={{ fontWeight: 300 }}>CARE</span></div>
+          }}>BARE</div>
           <div style={{ display: "flex", gap: 16, color: "#64748b", fontSize: 12 }}>
             {["Products", "Story", "Stores"].map((t, i) => (
               <span key={i} style={{ color: chapter === i ? "#7c3aed" : "#64748b", transition: "color 0.3s", fontWeight: chapter === i ? 700 : 500 }}>{t}</span>

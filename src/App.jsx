@@ -46,7 +46,7 @@ function createLabelTexture(text, hexColor) {
   return texture;
 }
 
-function useThreeScene(canvasRef, dragRef, reducedMotion, threeContext, activeShade) {
+function useThreeScene(canvasRef, dragRef, reducedMotion, threeContext, activeShade, setLoadProgress, setIsLoading) {
   const sceneRef = useRef(null);
   const startedRef = useRef(false);
   const texturesRef = useRef({ powder: {}, label: {} });
@@ -55,20 +55,6 @@ function useThreeScene(canvasRef, dragRef, reducedMotion, threeContext, activeSh
   useEffect(() => {
       currentShadeRef.current = activeShade;
   }, [activeShade]);
-
-  useEffect(() => {
-    const tl = new THREE.TextureLoader();
-    SHADES.forEach((shade, i) => {
-       if (shade.texture) {
-           tl.load(shade.texture, (tex) => {
-               tex.flipY = false; 
-               tex.colorSpace = THREE.SRGBColorSpace;
-               texturesRef.current.powder[i] = tex;
-           });
-       }
-       texturesRef.current.label[i] = createLabelTexture(shade.name, shade.color);
-    });
-  }, []);
 
   useEffect(() => {
     if (!canvasRef.current || startedRef.current) return;
@@ -92,9 +78,34 @@ function useThreeScene(canvasRef, dragRef, reducedMotion, threeContext, activeSh
     const camera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clientHeight, 0.1, 100);
     camera.position.set(0, 0, 5);
 
+    // ── LOADING MANAGER ──
+    const manager = new THREE.LoadingManager();
+    manager.onProgress = (url, itemsLoaded, itemsTotal) => {
+      setLoadProgress(Math.round((itemsLoaded / itemsTotal) * 100));
+    };
+    manager.onLoad = () => {
+      // Add slight delay before fading out to ensure textures are uploaded to GPU
+      setTimeout(() => setIsLoading(false), 600);
+    };
+
+    // 1. Load Textures with Manager
+    const tl = new THREE.TextureLoader(manager);
+    SHADES.forEach((shade, i) => {
+       if (shade.texture) {
+           tl.load(shade.texture, (tex) => {
+               tex.flipY = false; 
+               tex.colorSpace = THREE.SRGBColorSpace;
+               texturesRef.current.powder[i] = tex;
+           });
+       }
+       texturesRef.current.label[i] = createLabelTexture(shade.name, shade.color);
+    });
+
     const pmremGenerator = new THREE.PMREMGenerator(renderer);
     pmremGenerator.compileEquirectangularShader();
-    new RGBELoader().load('/hdr/studio_small_08_1k.hdr', (texture) => {
+    
+    // 2. Load HDR with Manager
+    new RGBELoader(manager).load('/hdr/studio_small_08_1k.hdr', (texture) => {
       const envMap = pmremGenerator.fromEquirectangular(texture).texture;
       scene.environment = envMap;
       texture.dispose();
@@ -139,8 +150,8 @@ function useThreeScene(canvasRef, dragRef, reducedMotion, threeContext, activeSh
       };
     }
 
-    const loader = new GLTFLoader();
-    // Only load the first product
+    // 3. Load GLTF with Manager
+    const loader = new GLTFLoader(manager);
     loader.load('/product.glb', (gltf) => {
         const model = gltf.scene;
         const nodes = {};
@@ -324,6 +335,10 @@ export default function App() {
   const [showHint, setShowHint] = useState(true);
   const [isMobile, setIsMobile] = useState(typeof window !== "undefined" ? window.innerWidth < 768 : false);
   const [activeShade, setActiveShade] = useState(0); 
+  
+  // Loading States
+  const [loadProgress, setLoadProgress] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => { threeContext.current.lastShade = activeShade; }, [activeShade]);
 
@@ -334,7 +349,7 @@ export default function App() {
     velX: 0, velY: 0, lastTap: 0, tapStartX: 0, tapStartY: 0, tapStartTime: 0
   });
 
-  useThreeScene(canvasRef, dragRef, reducedMotion, threeContext, activeShade);
+  useThreeScene(canvasRef, dragRef, reducedMotion, threeContext, activeShade, setLoadProgress, setIsLoading);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768);
@@ -379,11 +394,26 @@ export default function App() {
 
   return (
     <div style={{ width: "100%", height: "100vh", background: "#ffffff", fontFamily: "'Segoe UI', system-ui, sans-serif", overflow: "hidden", position: "relative" }}>
+      
+      {/* ── LOADING OVERLAY ── */}
+      <div style={{
+        position: 'absolute', inset: 0, zIndex: 100, background: '#ffffff',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        opacity: isLoading ? 1 : 0, pointerEvents: isLoading ? 'auto' : 'none',
+        transition: 'opacity 0.8s cubic-bezier(0.16, 1, 0.3, 1)'
+      }}>
+        <div style={{ fontSize: 24, fontWeight: 300, letterSpacing: 4, marginBottom: 24, fontFamily: "'Times New Roman', serif", color: '#111827' }}>BARE</div>
+        <div style={{ width: '180px', height: '2px', background: '#f1f5f9', borderRadius: '2px', overflow: 'hidden' }}>
+          <div style={{ width: `${loadProgress}%`, height: '100%', background: '#111827', transition: 'width 0.3s ease' }} />
+        </div>
+        <div style={{ fontSize: 10, marginTop: 12, letterSpacing: 2, color: '#64748b', fontWeight: 600 }}>{loadProgress}%</div>
+      </div>
+
       <div ref={interactRef} style={{ position: "absolute", inset: 0, zIndex: 15, touchAction: "none" }} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} />
 
       <canvas ref={canvasRef} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", zIndex: 1, pointerEvents: "none" }} />
 
-      <div style={{ position: "absolute", top: "55%", left: "50%", transform: "translate(-50%, -50%)", opacity: showHint && !isMobile ? 1 : 0, transition: "opacity 0.8s ease", pointerEvents: "none", zIndex: 30 }}>
+      <div style={{ position: "absolute", top: "55%", left: "50%", transform: "translate(-50%, -50%)", opacity: showHint && !isMobile && !isLoading ? 1 : 0, transition: "opacity 0.8s ease", pointerEvents: "none", zIndex: 30 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.9)', padding: '8px 16px', borderRadius: 20, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
           <span style={{ fontSize: 16 }}>⟷👆</span><span style={{ fontSize: 11, fontWeight: 700, color: '#111827', letterSpacing: 1 }}>DRAG OR TAP</span>
         </div>
@@ -398,6 +428,7 @@ export default function App() {
         padding: isMobile ? "24px 24px 48px 24px" : 0,
         background: isMobile ? "#ffffff" : "transparent",
         zIndex: 20, pointerEvents: "none",
+        opacity: isLoading ? 0 : 1, transform: isLoading ? "translateY(24px)" : "translateY(0)", transition: "opacity 1.2s ease 0.4s, transform 1.2s ease 0.4s"
       }}>
         <div style={{ 
           width: "100%", maxWidth: "420px", color: "#111", textAlign: "left", 
@@ -447,10 +478,10 @@ export default function App() {
       </div>
 
       <div style={{ position: "absolute", top: 0, left: 0, right: 0, display: "flex", justifyContent: "center", alignItems: "center", padding: "16px 20px", background: "none", zIndex: 50, pointerEvents: "none" }}>
-        <div style={{ fontSize: 28, fontWeight: 400, letterSpacing: 1, color: "#111827", fontFamily: "'Times New Roman', Times, serif" }}>BARE</div>
+        <div style={{ fontSize: 28, fontWeight: 400, letterSpacing: 1, color: "#111827", fontFamily: "'Times New Roman', Times, serif", opacity: isLoading ? 0 : 1, transition: "opacity 0.8s ease 0.4s" }}>BARE</div>
       </div>
       {!isMobile && (
-        <div style={{ position: "absolute", top: 0, right: 0, display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 40px", zIndex: 50 }}>
+        <div style={{ position: "absolute", top: 0, right: 0, display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 40px", zIndex: 50, opacity: isLoading ? 0 : 1, transition: "opacity 0.8s ease 0.4s" }}>
           <div style={{ display: "flex", gap: 24, color: "#64748b", fontSize: 14, pointerEvents: "auto" }}>
             {["Products", "Our Story", "Our Stores"].map((t, i) => (<span key={i} style={{ color: i === 0 ? "#111827" : "inherit", fontWeight: i === 0 ? 600 : 400, cursor: "pointer" }}>{t}</span>))}
           </div>

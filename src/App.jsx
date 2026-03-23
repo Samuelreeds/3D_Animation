@@ -4,167 +4,94 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { RGBELoader } from "three/examples/jsm/loaders/RGBELoader.js";
 import "./App.css";
 
-// ── Shop data (Phnom Penh Locations) ───────────────────────────────────────
-const SHOPS = [
-  {
-    name: "Beauty Story",
-    branch: "Sonthormuk",
-    status: "OPEN NOW",
-    hours: "8:30 AM - 9:00 PM",
-    tag: "WHOLESALER",
-    phone: "017 755 571",
-    x: 42, y: 35,
-  },
-  {
-    name: "Jomros Store",
-    branch: "Bak Touk",
-    status: "OPEN NOW",
-    hours: "8:00 AM - 8:00 PM",
-    tag: "RETAIL",
-    phone: "012 345 678",
-    x: 65, y: 28,
-  },
-  {
-    name: "MNC Store",
-    branch: "Olympic Market",
-    status: "OPEN NOW",
-    hours: "9:00 AM - 9:00 PM",
-    tag: "RETAIL",
-    phone: "098 765 432",
-    x: 68, y: 65,
-  },
-  {
-    name: "Jomros Store",
-    branch: "Vanda Institute",
-    status: "OPEN NOW",
-    hours: "8:00 AM - 8:00 PM",
-    tag: "RETAIL",
-    phone: "012 345 678",
-    x: 55, y: 78,
-  }
+const SHADES = [
+  { name: 'AMORE', texture: '/texture/Amore (3).png', status: 'in', stock: 193, color: '#c27964' },
+  { name: 'OFF DUTY', texture: '/texture/Off Duty (3).png', status: 'out', stock: 0, color: '#e5e7eb' },
+  { name: 'PINK CLOUD', texture: '/texture/Pink Cloud (3).png', status: 'out', stock: 0, color: '#fca5a5' },
+  { name: 'BUBBLE', texture: '/texture/Bubble (3).png', status: 'in', stock: 86, color: '#f472b6' },
+  { name: 'CARAMEL', texture: '/texture/Caramel (3).png', status: 'in', stock: 112, color: '#d97757' },
+  { name: 'DEEP THROAT', texture: '/texture/Deep Throat (3).png', status: 'in', stock: 89, color: '#b0594a' },
+  { name: 'DOLCE', texture: '/texture/Dolce (3).png', status: 'in', stock: 29, color: '#c05c5c' },
+  { name: 'GIRL CRUSH', texture: '/texture/Girl Crush (3).png', status: 'in', stock: 71, color: '#e77369' },
+  { name: 'HOT SAUCE', texture: '/texture/Hot Sauce (3).png', status: 'in', stock: 35, color: '#dc2626' },
+  { name: 'TEDDY', texture: '/texture/Teddy (3).png', status: 'in', stock: 180, color: '#b95c50' }
 ];
 
-// ── SVG Mini-Map (Google Maps Style) ────────────────────────────────────────
-function MiniMap({ activeShop, isActive }) {
-  return (
-    <div style={{ width: "100%", height: "100%", position: "relative", background: "#f0fdf4" }}>
-      {/* Grid lines / Minor roads */}
-      <svg width="100%" height="100%" style={{ position: "absolute", inset: 0, opacity: 0.5 }}>
-        {[...Array(15)].map((_, i) => (
-          <line key={`v${i}`} x1={`${(i + 1) * 6.66}%`} y1="0" x2={`${(i + 1) * 6.66}%`} y2="100%" stroke="#e2e8f0" strokeWidth="1" />
-        ))}
-        {[...Array(10)].map((_, i) => (
-          <line key={`h${i}`} x1="0" y1={`${(i + 1) * 10}%`} x2="100%" y2={`${(i + 1) * 10}%`} stroke="#e2e8f0" strokeWidth="1" />
-        ))}
-      </svg>
-
-      {/* Major Roads and Landmarks */}
-      <svg width="100%" height="100%" style={{ position: "absolute", inset: 0 }} viewBox="0 0 100 100" preserveAspectRatio="none">
-        {/* Olympic Stadium Green Area */}
-        <rect x="58" y="48" width="18" height="14" rx="3" fill="#bbf7d0" opacity="0.8" />
-        
-        {/* Major Arteries */}
-        <path d="M0,40 Q40,35 100,20" stroke="#cbd5e1" strokeWidth="3" fill="none" />
-        <path d="M45,0 L55,100" stroke="#cbd5e1" strokeWidth="2.5" fill="none" />
-        <path d="M10,100 Q40,60 100,55" stroke="#cbd5e1" strokeWidth="2.5" fill="none" />
-        <path d="M75,0 L65,100" stroke="#cbd5e1" strokeWidth="2" fill="none" />
-      </svg>
-
-      {/* Pins */}
-      {SHOPS.map((p, i) => (
-        <div key={i} style={{
-          position: "absolute",
-          left: `${p.x}%`,
-          top: `${p.y}%`,
-          transform: isActive ? "translate(-50%, -100%) scale(1)" : "translate(-50%, -100%) scale(0.5)",
-          opacity: isActive ? 1 : 0,
-          transition: `opacity 0.5s ease ${isActive ? i * 0.15 : 0}s, transform 0.5s cubic-bezier(0.34,1.56,0.64,1) ${isActive ? i * 0.15 : 0}s`,
-          zIndex: activeShop === i ? 20 : 10,
-        }}>
-          {/* Map Label */}
-          <div style={{
-            position: "absolute",
-            left: 20, top: -10,
-            background: "white",
-            padding: "4px 8px",
-            borderRadius: 4,
-            fontSize: 9,
-            fontWeight: 700,
-            color: activeShop === i ? "#111827" : "#64748b",
-            boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
-            whiteSpace: "nowrap",
-            border: activeShop === i ? "1px solid #111827" : "1px solid #e2e8f0",
-            transform: "translateY(-50%)",
-            transition: "all 0.3s ease",
-            zIndex: 2,
-          }}>
-            {p.name.toUpperCase()} {p.branch ? `(${p.branch.toUpperCase()})` : ''}
-          </div>
-
-          {/* Map Pin */}
-          <div style={{
-            width: activeShop === i ? 28 : 22,
-            height: activeShop === i ? 28 : 22,
-            background: activeShop === i ? "#111827" : "#3b82f6", 
-            borderRadius: "50% 50% 50% 0",
-            transform: "rotate(-45deg)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            border: "2px solid white",
-            boxShadow: activeShop === i ? "0 8px 16px rgba(0,0,0,0.3)" : "0 4px 8px rgba(0,0,0,0.15)",
-            transition: "all 0.3s cubic-bezier(0.34,1.56,0.64,1)",
-          }}>
-            <div style={{
-              width: activeShop === i ? 10 : 6,
-              height: activeShop === i ? 10 : 6,
-              background: "white",
-              borderRadius: "50%",
-              transition: "all 0.3s ease"
-            }} />
-          </div>
-        </div>
-      ))}
-    </div>
-  );
+function createLabelTexture(text, hexColor) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512; 
+  canvas.height = 512;
+  const ctx = canvas.getContext('2d');
+  
+  ctx.fillStyle = hexColor;
+  ctx.fillRect(0, 0, 512, 512);
+  
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 150px "Century Gothic", sans-serif'; 
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  if (ctx.letterSpacing !== undefined) {
+      ctx.letterSpacing = '8px'; 
+  }
+  
+  ctx.save();
+  ctx.translate(256, 256);
+  ctx.rotate(-Math.PI / 2); 
+  ctx.fillText(text, 0, 0, 400); 
+  ctx.restore();
+  
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 16;
+  return texture;
 }
 
-// ── Three.js product renderer ───────────────────────────────────────────────
-function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion, threeContext) {
+function useThreeScene(canvasRef, dragRef, reducedMotion, threeContext, activeShade) {
   const sceneRef = useRef(null);
   const startedRef = useRef(false);
+  const texturesRef = useRef({ powder: {}, label: {} });
+  
+  const currentShadeRef = useRef(activeShade);
+  useEffect(() => {
+      currentShadeRef.current = activeShade;
+  }, [activeShade]);
+
+  useEffect(() => {
+    const tl = new THREE.TextureLoader();
+    SHADES.forEach((shade, i) => {
+       if (shade.texture) {
+           tl.load(shade.texture, (tex) => {
+               tex.flipY = false; 
+               tex.colorSpace = THREE.SRGBColorSpace;
+               texturesRef.current.powder[i] = tex;
+           });
+       }
+       texturesRef.current.label[i] = createLabelTexture(shade.name, shade.color);
+    });
+  }, []);
 
   useEffect(() => {
     if (!canvasRef.current || startedRef.current) return;
     startedRef.current = true;
     
     const canvas = canvasRef.current;
-    
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
     renderer.setClearColor(0xffffff, 0);
 
-    // Color Management
-    if (renderer.outputColorSpace !== undefined) {
-      renderer.outputColorSpace = THREE.SRGBColorSpace;
-    } else {
-      renderer.outputEncoding = 3001; // THREE.sRGBEncoding fallback
-    }
+    if (renderer.outputColorSpace !== undefined) renderer.outputColorSpace = THREE.SRGBColorSpace;
+    else renderer.outputEncoding = 3001; 
+    
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.15;
 
     const scene = new THREE.Scene();
-
-    // Rotate the studio environment by 90 degrees (Math.PI / 2)
-    if (scene.environmentRotation !== undefined) {
-      scene.environmentRotation.y = Math.PI / 2;
-    }
+    if (scene.environmentRotation !== undefined) scene.environmentRotation.y = Math.PI / 2;
 
     const camera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clientHeight, 0.1, 100);
     camera.position.set(0, 0, 5);
 
-    // HDRI Environment
     const pmremGenerator = new THREE.PMREMGenerator(renderer);
     pmremGenerator.compileEquirectangularShader();
     new RGBELoader().load('/hdr/studio_small_08_1k.hdr', (texture) => {
@@ -174,23 +101,14 @@ function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion, threeC
       pmremGenerator.dispose();
     });
 
-    // Lights Setup
-    const ambient = new THREE.AmbientLight(0xffffff, 0.5); 
-    scene.add(ambient);
-    const dir = new THREE.DirectionalLight(0xffffff, 2.5); 
-    dir.position.set(5, 6, 4); 
-    scene.add(dir);
-    const fillLight = new THREE.DirectionalLight(0xffffff, 1.2); 
-    fillLight.position.set(-5, 2, 6);
-    scene.add(fillLight);
-    const rimLight = new THREE.PointLight(0xa78bfa, 1.5, 12); 
-    rimLight.position.set(-3, 3, -2);
-    scene.add(rimLight);
+    const ambient = new THREE.AmbientLight(0xffffff, 0.5); scene.add(ambient);
+    const dir = new THREE.DirectionalLight(0xffffff, 2.5); dir.position.set(5, 6, 4); scene.add(dir);
+    const fillLight = new THREE.DirectionalLight(0xffffff, 1.2); fillLight.position.set(-5, 2, 6); scene.add(fillLight);
+    const rimLight = new THREE.PointLight(0xa78bfa, 1.5, 12); rimLight.position.set(-3, 3, -2); scene.add(rimLight);
 
     const group = new THREE.Group();
     scene.add(group);
 
-    // Raycaster Setup for Tap-To-Open
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
 
@@ -199,142 +117,105 @@ function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion, threeC
         const rect = canvas.getBoundingClientRect();
         pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
         pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
-
         raycaster.setFromCamera(pointer, camera);
 
-        const prog = scrollProgress.current || 0;
-        let activeIndex = 0;
-        if (prog < 0.33) activeIndex = 0;
-        else if (prog < 0.66) activeIndex = 1;
-        else activeIndex = 2;
+        if (sceneRef.current?.products) {
+            const interacts = [];
+            sceneRef.current.products.forEach(prod => {
+                if (prod.cap) {
+                    const productIntersects = raycaster.intersectObject(prod.wrapper, true);
+                    if (productIntersects.length > 0) {
+                        interacts.push({ prod, intersect: productIntersects[0] });
+                    }
+                }
+            });
 
-        if (sceneRef.current && sceneRef.current.products && sceneRef.current.products.length > 0) {
-          // Use product 2 for section 2 and 3
-          const modelIndex = activeIndex === 0 ? 0 : 1;
-          const activeProduct = sceneRef.current.products[modelIndex];
-
-          if (activeProduct && activeProduct.cap) {
-            const intersects = raycaster.intersectObject(activeProduct.wrapper, true);
-            if (intersects.length > 0) {
-              activeProduct.wrapper.userData.isOpen = !activeProduct.wrapper.userData.isOpen;
+            if (interacts.length > 0) {
+                interacts.sort((a, b) => a.intersect.distance - b.intersect.distance);
+                const activeProduct = interacts[0].prod;
+                activeProduct.wrapper.userData.isOpen = !activeProduct.wrapper.userData.isOpen;
             }
-          }
         }
       };
     }
 
     const loader = new GLTFLoader();
-    
-    // Define exact paths for your products
-    const productPaths = ['/product.glb', '/product2.glb'];
-    
-    Promise.all(productPaths.map((path, index) => {
-      return new Promise((resolve) => {
-        loader.load(
-          path, 
-          (gltf) => {
-            const model = gltf.scene;
-            const nodes = {};
-            
-            model.traverse((child) => {
-              if (child.name) nodes[child.name] = child;
-            });
-            
-            console.log(`[BARE-3D] Loaded ${path}. Available nodes:`, Object.keys(nodes));
-            
-            const box = new THREE.Box3().setFromObject(model);
-            const center = box.getCenter(new THREE.Vector3());
-            model.position.sub(center);
-            
-            // Material Tuning
-            model.traverse((child) => {
-              if (child.isMesh && child.material) {
-                const mat = child.material;
-                if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial) {
-                  mat.metalness = Math.max(mat.metalness !== undefined ? mat.metalness : 0, 0.7);
-                  mat.roughness = Math.min(mat.roughness !== undefined ? mat.roughness : 1, 0.25);
-                  mat.envMapIntensity = 1.2;
-                  
-                  if (mat.map) {
-                    if (mat.map.colorSpace !== undefined) {
-                      mat.map.colorSpace = THREE.SRGBColorSpace;
-                    } else {
-                      mat.map.encoding = 3001; // THREE.sRGBEncoding
-                    }
-                  }
-                }
+    // Only load the first product
+    loader.load('/product.glb', (gltf) => {
+        const model = gltf.scene;
+        const nodes = {};
+        model.traverse((child) => { if (child.name) nodes[child.name] = child; });
+        
+        const box = new THREE.Box3().setFromObject(model);
+        const center = box.getCenter(new THREE.Vector3());
+        model.position.sub(center);
+        
+        model.traverse((child) => {
+          if (child.isMesh && child.material) {
+            const mat = child.material;
+            if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial) {
+              mat.metalness = Math.max(mat.metalness !== undefined ? mat.metalness : 0, 0.7);
+              mat.roughness = Math.min(mat.roughness !== undefined ? mat.roughness : 1, 0.25);
+              mat.envMapIntensity = 1.2;
+              if (mat.map) {
+                if (mat.map.colorSpace !== undefined) mat.map.colorSpace = THREE.SRGBColorSpace;
+                else mat.map.encoding = 3001; 
               }
-            });
-
-            // Dynamic cap discovery as fallback if strict nodes are missing
-            let cap = nodes["Cap.001"] || nodes["Cap"] || nodes["cap"] || nodes["Lid"];
-            if (!cap) {
-              model.traverse((child) => {
-                if (child.isMesh && (child.name.toLowerCase().includes('cap') || child.name.toLowerCase().includes('lid'))) {
-                  cap = child;
-                }
-              });
             }
-            
-            if (cap) {
-              cap.userData.originalY = cap.position.y;
-            }
-
-            const wrapper = new THREE.Group();
-            wrapper.userData.isOpen = false;
-            wrapper.add(model);
-            wrapper.scale.setScalar(0);
-            wrapper.position.y = -2;
-            group.add(wrapper);
-            
-            resolve({ index, wrapper, cap });
-          }, 
-          undefined, 
-          (error) => {
-            console.error(`Error loading ${path}, using fallback mesh:`, error);
-            const fallbackGeo = new THREE.CapsuleGeometry(0.5, 0.8, 4, 16);
-            const fallbackMat = new THREE.MeshStandardMaterial({ color: 0x111827 });
-            const fallbackMesh = new THREE.Mesh(fallbackGeo, fallbackMat);
-            fallbackMesh.scale.setScalar(0);
-            fallbackMesh.position.y = -2;
-            const wrapper = new THREE.Group();
-            wrapper.userData.isOpen = false;
-            wrapper.add(fallbackMesh);
-            group.add(wrapper);
-            resolve({ index, wrapper, cap: null });
           }
-        );
-      });
-    })).then((results) => {
-      // Sort to ensure the order matches chapter 0, 1
-      results.sort((a, b) => a.index - b.index);
-      if (sceneRef.current) {
-        sceneRef.current.products = results;
+        });
+
+        let cap = nodes["CAP: [BLUSH POWDER].010"] || nodes["CAP"] || nodes["Cap.001"] || nodes["Cap"] || nodes["cap"] || nodes["Lid"];
+        if (!cap) model.traverse((child) => { if (child.isMesh && (child.name.toLowerCase().includes('cap') || child.name.toLowerCase().includes('lid'))) cap = child; });
+        if (cap) { cap.userData.originalY = cap.position.y; cap.userData.originalRotX = cap.rotation.x; }
+
+        let powderMesh = null;
+        let labelMesh = null;
+
+        model.traverse((child) => {
+            if (child.isMesh) {
+                if (child.name === 'PowderMesh' || child.name.includes('mesh.086') || child.name.toLowerCase().includes('powder')) {
+                    powderMesh = child;
+                }
+                if (child.name === 'label.011' || child.name.includes('label') || child.name.includes('mesh.085')) {
+                    labelMesh = child;
+                }
+            }
+        });
+
+        if (powderMesh) {
+            powderMesh.material = new THREE.MeshStandardMaterial({
+                color: 0xffffff,
+                roughness: 0.9,
+                metalness: 0.1
+            });
+        }
+        
+        if (labelMesh) {
+            labelMesh.material = new THREE.MeshStandardMaterial({
+                color: 0xffffff,
+                roughness: 0.5,
+                metalness: 0.1
+            });
+        }
+
+        const wrapper = new THREE.Group();
+        wrapper.userData.isOpen = false;
+        wrapper.add(model);
+        wrapper.scale.setScalar(0);
+        wrapper.position.y = -2;
+        group.add(wrapper);
+        
+        if (sceneRef.current) sceneRef.current.products = [{ index: 0, wrapper, cap, powderMesh, labelMesh }];
       }
-    });
+    );
 
-    // Particle Count reduced for subtlety
-    const particleCount = 100;
-    const pGeo = new THREE.BufferGeometry();
-    const positions = new Float32Array(particleCount * 3);
-    for (let i = 0; i < particleCount; i++) {
-      positions[i * 3]     = (Math.random() - 0.5) * 6;
-      positions[i * 3 + 1] = (Math.random() - 0.5) * 6;
-      positions[i * 3 + 2] = (Math.random() - 0.5) * 4;
-    }
-    pGeo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-    const pMat = new THREE.PointsMaterial({ color: 0x000000, size: 0.03, transparent: true, opacity: 0.6 });
-    const particles = new THREE.Points(pGeo, pMat);
-    scene.add(particles);
-
-    sceneRef.current = { renderer, scene, camera, group, particles, rimLight, products: [] };
+    sceneRef.current = { renderer, scene, camera, group, rimLight, products: [] };
 
     const onResize = () => {
-      const w2 = canvas.clientWidth;
-      const h2 = canvas.clientHeight;
-      camera.aspect = w2 / h2;
+      camera.aspect = canvas.clientWidth / canvas.clientHeight;
       camera.updateProjectionMatrix();
-      renderer.setSize(w2, h2, false);
+      renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
     };
     window.addEventListener("resize", onResize);
 
@@ -344,123 +225,74 @@ function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion, threeC
       raf = requestAnimationFrame(animate);
       t += 0.01;
 
-      const prog = scrollProgress.current || 0;
       const d = dragRef.current;
+      const isMobile = window.innerWidth < 768;
+
+      if (sceneRef.current?.products?.[0]) {
+          const product = sceneRef.current.products[0];
+          const activeIndex = currentShadeRef.current;
+          
+          if (product.powderMesh) {
+              const targetPowderTex = texturesRef.current.powder[activeIndex];
+              if (targetPowderTex && product.powderMesh.material.map !== targetPowderTex) {
+                  product.powderMesh.material.map = targetPowderTex;
+                  product.powderMesh.material.needsUpdate = true;
+              }
+          }
+          
+          if (product.labelMesh) {
+              const targetLabelTex = texturesRef.current.label[activeIndex];
+              if (targetLabelTex && product.labelMesh.material.map !== targetLabelTex) {
+                  product.labelMesh.material.map = targetLabelTex;
+                  product.labelMesh.material.needsUpdate = true;
+              }
+          }
+      }
 
       if (!d.dragActive && !reducedMotion) {
-        d.rotOffsetX += d.velY;
-        d.rotOffsetY += d.velX;
-        d.velX *= 0.92;
-        d.velY *= 0.92;
+        d.rotOffsetX += d.velY; d.rotOffsetY += d.velX;
+        d.velX *= 0.92; d.velY *= 0.92;
       }
       d.rotOffsetX = Math.max(-0.35, Math.min(0.35, d.rotOffsetX));
 
-      // Determine active section index
-      let activeIndex = 0;
-      if (prog < 0.33) activeIndex = 0;
-      else if (prog < 0.66) activeIndex = 1;
-      else activeIndex = 2;
+      const targetX = isMobile ? 0 : -1.8; 
+      const targetCamZ = isMobile ? 6 : 5;
+      const targetRimInt = 1.5;
+      rimLight.color.setHSL(0.75, 0.9, 0.6);
 
-      // Base targets
-      let targetX = 0;
-      let targetCamZ = 5;
-      let targetRimInt = 1.5;
-
-      if (activeIndex === 1) {
-        const spin = (prog - 0.33) / 0.33;
-        targetRimInt = 1.5 + spin * 1.0;
-        rimLight.color.setHSL(0.75 + spin * 0.1, 0.9, 0.6);
-      } else if (activeIndex === 2) {
-        const mapProg = Math.min(1, (prog - 0.66) / 0.34);
-        targetX = -1.5 * mapProg;
-        targetCamZ = 5 + mapProg * 1;
-        targetRimInt = 2.5 - mapProg * 1.5;
-        rimLight.color.setHSL(0.75, 0.9, 0.6);
-      } else {
-        rimLight.color.setHSL(0.75, 0.9, 0.6);
-      }
-
-      // Apply lerp for smooth transitions
       const lerpSpeed = reducedMotion ? 1.0 : 0.08;
       group.position.x = THREE.MathUtils.lerp(group.position.x, targetX, lerpSpeed);
       camera.position.z = THREE.MathUtils.lerp(camera.position.z, targetCamZ, lerpSpeed);
       rimLight.intensity = THREE.MathUtils.lerp(rimLight.intensity, targetRimInt, lerpSpeed);
 
-      // Handle products pop up / switch
-      if (sceneRef.current && sceneRef.current.products && sceneRef.current.products.length > 0) {
-        sceneRef.current.products.forEach((prod, i) => {
-          // Section 1: product 1 (index 0)
-          // Section 2 & 3: product 2 (index 1)
-          const isActiveModel = (activeIndex === 0 && i === 0) || (activeIndex > 0 && i === 1);
+      if (sceneRef.current && sceneRef.current.products.length > 0) {
+        const prod = sceneRef.current.products[0];
+        const baseScale = 3.5 * (isMobile ? 0.75 : 1.0);
+        
+        let pTargetScale = baseScale;
+        let pTargetY = Math.sin(t * 0.8) * 0.08 + (isMobile ? 1.8 : 0);
+        let capTargetY = prod.cap ? prod.cap.userData.originalY : 0;
+        let capTargetRotX = prod.cap ? prod.cap.userData.originalRotX : 0;
+        let targetRotZ = 0;
 
-          let pTargetScale = 0;
-          let pTargetY = -2;
-          let capTargetY = prod.cap ? prod.cap.userData.originalY : 0;
-          let targetRotZ = 0;
+        if (prod.cap && prod.wrapper.userData.isOpen) {
+            capTargetRotX = prod.cap.userData.originalRotX - 1.5; 
+        }
 
-          if (isActiveModel) {
-             pTargetY = Math.sin(t * 0.8) * 0.08;
+        prod.wrapper.scale.setScalar(THREE.MathUtils.lerp(prod.wrapper.scale.x, pTargetScale, lerpSpeed));
+        prod.wrapper.position.y = THREE.MathUtils.lerp(prod.wrapper.position.y, pTargetY, lerpSpeed);
+        prod.wrapper.rotation.z = THREE.MathUtils.lerp(prod.wrapper.rotation.z, targetRotZ, lerpSpeed);
 
-             if (activeIndex === 0) {
-                 pTargetScale = 1.4;
-             } else if (activeIndex === 1) {
-                 const spin = (prog - 0.33) / 0.33;
-                 pTargetScale = 1.4 + spin * 0.08;
-                 
-                 // Handle auto-separation OR interactive opening
-                 if (prod.cap) {
-                    if (prod.wrapper.userData.isOpen) {
-                        capTargetY = prod.cap.userData.originalY + 0.8;
-                    } else {
-                        capTargetY = prod.cap.userData.originalY; 
-                    }
-                 }
-             } else if (activeIndex === 2) {
-                 const mapProg = Math.min(1, (prog - 0.66) / 0.34);
-                 pTargetScale = 1.4 - mapProg * 0.55;
-                 pTargetY = 0.8 * mapProg + Math.sin(t * 0.8) * 0.04 * (1 - mapProg);
-                 if (prod.cap) {
-                     if (prod.wrapper.userData.isOpen) {
-                        capTargetY = prod.cap.userData.originalY + 1.2 * mapProg;
-                     } else {
-                        capTargetY = prod.cap.userData.originalY;
-                     }
-                 }
-                 targetRotZ = 0.15 * mapProg;
-             }
-          }
-
-          prod.wrapper.scale.setScalar(THREE.MathUtils.lerp(prod.wrapper.scale.x, pTargetScale, lerpSpeed));
-          prod.wrapper.position.y = THREE.MathUtils.lerp(prod.wrapper.position.y, pTargetY, lerpSpeed);
-          
-          if (isActiveModel) {
-              prod.wrapper.rotation.z = THREE.MathUtils.lerp(prod.wrapper.rotation.z, targetRotZ, lerpSpeed);
-          } else {
-              prod.wrapper.rotation.z = THREE.MathUtils.lerp(prod.wrapper.rotation.z, 0, lerpSpeed);
-          }
-
-          if (prod.cap) {
-            prod.cap.position.y = THREE.MathUtils.lerp(prod.cap.position.y, capTargetY, lerpSpeed * 1.5);
-          }
-        });
+        if (prod.cap) {
+          prod.cap.position.y = THREE.MathUtils.lerp(prod.cap.position.y, capTargetY, lerpSpeed * 1.5);
+          prod.cap.rotation.x = THREE.MathUtils.lerp(prod.cap.rotation.x, capTargetRotX, lerpSpeed * 1.5);
+        }
       }
 
-      // Handle custom rotation via explicit offset lerping to avoid snapping
-      let targetSpinOffset = 0;
-      if (activeIndex === 1) {
-        const spin = (prog - 0.33) / 0.33;
-        const spinFactor = d.dragActive ? 0.2 : 1.0;
-        targetSpinOffset = spin * Math.PI * 2 * spinFactor;
-      }
-      
       if (d.currentSpinOffset === undefined) d.currentSpinOffset = 0;
-      d.currentSpinOffset = THREE.MathUtils.lerp(d.currentSpinOffset, targetSpinOffset, lerpSpeed);
-
+      d.currentSpinOffset = THREE.MathUtils.lerp(d.currentSpinOffset, 0, lerpSpeed);
       group.rotation.y = t * 0.3 + d.currentSpinOffset + d.rotOffsetY;
       group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, d.rotOffsetX, lerpSpeed);
-
-      particles.rotation.y += 0.001;
-      particles.rotation.x += 0.0005;
 
       renderer.render(scene, camera);
     };
@@ -469,452 +301,161 @@ function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion, threeC
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", onResize);
-      
       group.traverse((child) => {
         if (child.isMesh) {
           if (child.geometry) child.geometry.dispose();
           if (child.material) {
-            if (Array.isArray(child.material)) {
-              child.material.forEach(mat => mat.dispose());
-            } else {
-              child.material.dispose();
-            }
+            if (Array.isArray(child.material)) child.material.forEach(mat => mat.dispose());
+            else child.material.dispose();
           }
         }
       });
-      
-      if (pGeo) pGeo.dispose();
-      if (pMat) pMat.dispose();
       renderer.dispose();
       startedRef.current = false;
     };
-  }, [reducedMotion, threeContext]);
+  }, [reducedMotion, threeContext]); 
 }
 
-// ── Main App ────────────────────────────────────────────────────────────────
 export default function App() {
-  const scrollRef = useRef(null);
   const canvasRef = useRef(null);
   const interactRef = useRef(null);
   const threeContext = useRef({});
   
-  const scrollProgress = useRef(0);
-  const [chapter, setChapter] = useState(0);
-  const [activeShop, setActiveShop] = useState(0);
   const [showHint, setShowHint] = useState(true);
+  const [isMobile, setIsMobile] = useState(typeof window !== "undefined" ? window.innerWidth < 768 : false);
+  const [activeShade, setActiveShade] = useState(0); 
 
-  const [reducedMotion] = useState(() =>
-    typeof window !== "undefined" ? window.matchMedia("(prefers-reduced-motion: reduce)").matches : false
-  );
+  useEffect(() => { threeContext.current.lastShade = activeShade; }, [activeShade]);
+
+  const [reducedMotion] = useState(() => typeof window !== "undefined" ? window.matchMedia("(prefers-reduced-motion: reduce)").matches : false);
 
   const dragRef = useRef({
-    dragActive: false,
-    lastX: 0,
-    lastY: 0,
-    rotOffsetX: 0,
-    rotOffsetY: 0,
-    velX: 0,
-    velY: 0,
-    lastTap: 0,
-    tapStartX: 0,
-    tapStartY: 0,
-    tapStartTime: 0
+    dragActive: false, lastX: 0, lastY: 0, rotOffsetX: 0, rotOffsetY: 0,
+    velX: 0, velY: 0, lastTap: 0, tapStartX: 0, tapStartY: 0, tapStartTime: 0
   });
 
-  useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion, threeContext);
+  useThreeScene(canvasRef, dragRef, reducedMotion, threeContext, activeShade);
 
-  // Auto-hide product interaction hint
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   useEffect(() => {
     const timer = setTimeout(() => setShowHint(false), 5000);
     return () => clearTimeout(timer);
   }, []);
 
-  useEffect(() => {
-    const container = scrollRef.current;
-    if (!container) return;
-
-    const onScroll = () => {
-      const max = container.scrollHeight - container.clientHeight;
-      const prog = max > 0 ? container.scrollTop / max : 0;
-      scrollProgress.current = prog;
-
-      if (prog < 0.33) {
-        setChapter(0);
-      } else if (prog < 0.66) {
-        setChapter(1);
-      } else {
-        setChapter(2);
-        const mapProg = (prog - 0.66) / 0.34;
-        setActiveShop(Math.min(SHOPS.length - 1, Math.floor(mapProg * SHOPS.length)));
-      }
-    };
-
-    container.addEventListener("scroll", onScroll, { passive: true });
-    return () => container.removeEventListener("scroll", onScroll);
-  }, []);
-
   const handlePointerDown = (e) => {
-    const ww = window.innerWidth;
-    const wh = window.innerHeight;
-    
-    const minX = ww * 0.2;
-    const maxX = ww * 0.8;
-    const minY = wh * 0.2;
-    const maxY = wh * 0.8;
-
-    if (e.clientX >= minX && e.clientX <= maxX && e.clientY >= minY && e.clientY <= maxY) {
-      const d = dragRef.current;
-      d.dragActive = true;
-      d.lastX = e.clientX;
-      d.lastY = e.clientY;
-      d.velX = 0;
-      d.velY = 0;
-      
-      // Store potential tap start
-      d.tapStartX = e.clientX;
-      d.tapStartY = e.clientY;
-      d.tapStartTime = Date.now();
-      
-      if (interactRef.current) {
-        interactRef.current.setPointerCapture(e.pointerId);
-      }
-
-      const now = Date.now();
-      if (now - d.lastTap < 300) {
-        d.rotOffsetX = 0;
-        d.rotOffsetY = 0;
-      }
-      d.lastTap = now;
-      
-      setShowHint(false); // Hide hint once user interacts
-    }
+    const d = dragRef.current;
+    d.dragActive = true; d.lastX = e.clientX; d.lastY = e.clientY; d.velX = 0; d.velY = 0;
+    d.tapStartX = e.clientX; d.tapStartY = e.clientY; d.tapStartTime = Date.now();
+    if (interactRef.current) interactRef.current.setPointerCapture(e.pointerId);
+    if (Date.now() - d.lastTap < 300) { d.rotOffsetX = 0; d.rotOffsetY = 0; }
+    d.lastTap = Date.now();
+    setShowHint(false);
   };
 
   const handlePointerMove = (e) => {
     const d = dragRef.current;
     if (!d.dragActive) return;
-    
-    if (e.cancelable) {
-      e.preventDefault();
-    }
-
-    const deltaX = e.clientX - d.lastX;
-    const deltaY = e.clientY - d.lastY;
+    if (e.cancelable) e.preventDefault();
     const speed = 0.005;
-
-    d.rotOffsetY += deltaX * speed;
-    d.rotOffsetX += deltaY * speed;
-    
-    d.velX = deltaX * speed * 0.5;
-    d.velY = deltaY * speed * 0.5;
-
-    d.lastX = e.clientX;
-    d.lastY = e.clientY;
+    d.rotOffsetY += (e.clientX - d.lastX) * speed; d.rotOffsetX += (e.clientY - d.lastY) * speed;
+    d.velX = (e.clientX - d.lastX) * speed * 0.5; d.velY = (e.clientY - d.lastY) * speed * 0.5;
+    d.lastX = e.clientX; d.lastY = e.clientY;
   };
 
   const handlePointerUp = (e) => {
     const d = dragRef.current;
     if (!d.dragActive) return;
     d.dragActive = false;
-    
-    // Check if it was a quick tap without much movement
-    if (d.tapStartTime) {
-      const duration = Date.now() - d.tapStartTime;
-      const dist = Math.hypot(e.clientX - d.tapStartX, e.clientY - d.tapStartY);
-      
-      if (duration < 300 && dist < 10) {
-        if (threeContext.current.raycastTap) {
-          threeContext.current.raycastTap(e.clientX, e.clientY);
-        }
-      }
+    if (d.tapStartTime && (Date.now() - d.tapStartTime < 300) && Math.hypot(e.clientX - d.tapStartX, e.clientY - d.tapStartY) < 10) {
+      if (threeContext.current.raycastTap) threeContext.current.raycastTap(e.clientX, e.clientY);
     }
-    
-    if (interactRef.current) {
-      try {
-        interactRef.current.releasePointerCapture(e.pointerId);
-      } catch (err) { }
-    }
+    if (interactRef.current) { try { interactRef.current.releasePointerCapture(e.pointerId); } catch (err) { } }
   };
-
-  const shop = SHOPS[activeShop] || SHOPS[0];
 
   return (
     <div style={{ width: "100%", height: "100vh", background: "#ffffff", fontFamily: "'Segoe UI', system-ui, sans-serif", overflow: "hidden", position: "relative" }}>
+      <div ref={interactRef} style={{ position: "absolute", inset: 0, zIndex: 15, touchAction: "none" }} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} />
 
-      <div ref={scrollRef} style={{ position: "absolute", inset: 0, overflowY: "scroll", zIndex: 10, pointerEvents: "auto", WebkitOverflowScrolling: "touch" }}>
-        <div 
-          ref={interactRef}
-          style={{
-            position: "sticky", 
-            top: 0,
-            left: 0,
-            width: "100%",
-            height: "100vh",
-            zIndex: 15, 
-            pointerEvents: chapter === 2 ? "none" : "auto", 
-            touchAction: "pan-y" 
-          }}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerUp}
-        />
-        <div style={{ height: "200vh", pointerEvents: "none" }} />
+      <canvas ref={canvasRef} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", zIndex: 1, pointerEvents: "none" }} />
+
+      <div style={{ position: "absolute", top: "55%", left: "50%", transform: "translate(-50%, -50%)", opacity: showHint && !isMobile ? 1 : 0, transition: "opacity 0.8s ease", pointerEvents: "none", zIndex: 30 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.9)', padding: '8px 16px', borderRadius: 20, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
+          <span style={{ fontSize: 16 }}>⟷👆</span><span style={{ fontSize: 11, fontWeight: 700, color: '#111827', letterSpacing: 1 }}>DRAG OR TAP</span>
+        </div>
       </div>
 
-      <canvas ref={canvasRef} style={{
-        position: "absolute", inset: 0,
-        width: "100%", height: "100%",
-        zIndex: 1, pointerEvents: "none",
-      }} />
-
       <div style={{
-        position: "absolute", inset: 0, zIndex: 0,
-        background: chapter === 0
-          ? "radial-gradient(ellipse at 60% 40%, #f3f4f6 0%, #ffffff 70%)"
-          : chapter === 1
-          ? "radial-gradient(ellipse at 40% 50%, #e5e7eb 0%, #ffffff 70%)"
-          : "radial-gradient(ellipse at 50% 50%, #ffffff 0%, #ffffff 100%)",
-        transition: "background 1.2s ease",
-        pointerEvents: "none",
-      }} />
-
-      <div style={{
-        position: "absolute", inset: 0, zIndex: 2,
-        opacity: chapter === 2 ? 1 : 0,
-        transition: "opacity 0.8s ease",
-        pointerEvents: chapter === 2 ? "auto" : "none",
+        position: "absolute",
+        inset: isMobile ? "auto 0 0 0" : "0 0 0 0",
+        display: "flex", flexDirection: "column",
+        justifyContent: isMobile ? "flex-start" : "center", alignItems: isMobile ? "center" : "flex-end", 
+        paddingRight: isMobile ? 0 : "10vw",
+        padding: isMobile ? "24px 24px 48px 24px" : 0,
+        background: isMobile ? "#ffffff" : "transparent",
+        zIndex: 20, pointerEvents: "none",
       }}>
-        <MiniMap activeShop={activeShop} isActive={chapter === 2} />
-      </div>
-
-      {/* Persistent UI Layer */}
-      <div style={{ position: "absolute", inset: 0, zIndex: 20, pointerEvents: "none" }}>
-
-        {/* Story Progress Indicator */}
-        <div style={{ position: "absolute", right: 24, top: "50%", transform: "translateY(-50%)", zIndex: 40, display: "flex", flexDirection: "column", gap: 12 }}>
-          {[0, 1, 2].map(i => (
-            <div key={i} style={{
-              width: 8, height: 8, borderRadius: "50%",
-              background: chapter === i ? "#7c3aed" : "#cbd5e1",
-              transform: `scale(${chapter === i ? 1.5 : 1})`,
-              transition: "all 0.4s cubic-bezier(0.34,1.56,0.64,1)"
-            }} />
-          ))}
-        </div>
-
-        {/* Drag Interaction Hint */}
-        <div style={{
-          position: "absolute", top: "55%", left: "50%", transform: "translate(-50%, -50%)",
-          opacity: chapter === 0 && showHint ? 1 : 0, transition: "opacity 0.8s ease",
-          pointerEvents: "none", zIndex: 30
+        <div style={{ 
+          width: "100%", maxWidth: "420px", color: "#111", textAlign: "left", 
+          fontFamily: "'Century Gothic', 'Helvetica Neue', sans-serif", 
+          pointerEvents: "auto", 
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.9)', padding: '8px 16px', borderRadius: 20, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
-            <span style={{ fontSize: 16 }}>⟷👆</span>
-            <span style={{ fontSize: 11, fontWeight: 700, color: '#111827', letterSpacing: 1 }}>DRAG OR TAP</span>
+          <h1 style={{ fontSize: 20, fontWeight: 400, margin: "0 0 16px", letterSpacing: 0.5 }}>BARE Shimmer Blush Powder</h1>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 12, marginBottom: 12 }}>
+            <span style={{ background: "#000", color: "#fff", fontSize: 9, fontWeight: 700, padding: "4px 8px", letterSpacing: 1 }}>BESTSELLER</span>
           </div>
-        </div>
-
-        {/* Chapter 0 Content */}
-        <div style={{
-          position: "absolute", inset: 0, display: "flex", flexDirection: "column",
-          justifyContent: "flex-end", alignItems: "center",
-          paddingBottom: "12vh", paddingLeft: 24, paddingRight: 24,
-          opacity: chapter === 0 ? 1 : 0,
-          transform: chapter === 0 ? "translateY(0)" : "translateY(-24px)",
-          transition: "opacity 0.7s ease, transform 0.7s ease",
-        }}>
-          <div style={{ textAlign: "center", maxWidth: 360 }}>
-            {/* Chapter Label */}
-            <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 2, color: "#64748b", marginBottom: 16 }}>INTRODUCING</div>
-            
-            <div style={{
-              display: "inline-block", background: "rgba(167,139,250,0.1)",
-              border: "1px solid rgba(167,139,250,0.3)", borderRadius: 20,
-              padding: "4px 14px", marginBottom: 16,
-              color: "#7c3aed", fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase",
-            }}>New Collection 2025</div>
-            <h1 style={{
-              margin: "0 0 12px", fontSize: "clamp(32px, 8vw, 52px)",
-              fontWeight: 800, lineHeight: 1.05,
-              background: "linear-gradient(135deg, #111827 40%, #7c3aed)",
-              WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
-              letterSpacing: -1,
-            }}>Welcome to<br />BARE</h1>
-            <p style={{ color: "#4b5563", fontSize: 14, lineHeight: 1.6, margin: "0 0 24px" }}>
-              Science-backed skincare, crafted for every skin story.
-            </p>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 8, marginBottom: 12 }}>
+            <span style={{ fontSize: 12, letterSpacing: 2 }}>★★★★★</span> <span style={{ fontSize: 11, color: "#666", textDecoration: "underline" }}>(3) Rate</span>
           </div>
-        </div>
-
-        {/* Scroll Indicator */}
-        <div style={{
-          position: "absolute", bottom: "4vh", left: "50%", transform: "translateX(-50%)",
-          opacity: chapter === 0 ? 1 : 0, transition: "opacity 0.5s ease", zIndex: 30
-        }}>
-          <div className="animate-bounce-subtle" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, color: "#64748b", fontSize: 10, fontWeight: 700, letterSpacing: 1 }}>
-            <span style={{ fontSize: 14 }}>↓</span>
-            <span>SCROLL TO EXPLORE</span>
-          </div>
-        </div>
-
-        {/* Chapter 1 Content */}
-        <div style={{
-          position: "absolute", inset: 0, display: "flex", flexDirection: "column",
-          justifyContent: "flex-end", alignItems: "flex-start",
-          paddingBottom: "10vh", paddingLeft: 28, paddingRight: 28,
-          opacity: chapter === 1 ? 1 : 0,
-          transform: chapter === 1 ? "translateY(0)" : "translateY(20px)",
-          transition: "opacity 0.7s ease, transform 0.7s ease",
-        }}>
-          <div style={{ maxWidth: 300 }}>
-            {/* Chapter Label */}
-            <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 2, color: "#64748b", marginBottom: 16 }}>THE FORMULA</div>
-            
-            <div style={{ color: "#7c3aed", fontSize: 11, fontWeight: 800, letterSpacing: 2, textTransform: "uppercase", marginBottom: 10 }}>Signature Formula</div>
-            <h2 style={{ margin: "0 0 14px", fontSize: "clamp(24px, 6vw, 36px)", fontWeight: 800, color: "#111827", lineHeight: 1.1 }}>
-              Hydra-Repair<br />Serum Pro
-            </h2>
-            {[
-              { icon: "◈", text: "72-hour deep hydration lock" },
-              { icon: "◈", text: "Retinol + Hyaluronic complex" },
-              { icon: "◈", text: "Dermatologist tested & approved" },
-            ].map((b, i) => (
-              <div key={i} style={{
-                display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 10,
-                opacity: chapter === 1 ? 1 : 0,
-                transform: chapter === 1 ? "translateX(0)" : "translateX(-12px)",
-                transition: `opacity 0.5s ease ${i * 0.1 + 0.2}s, transform 0.5s ease ${i * 0.1 + 0.2}s`,
-              }}>
-                <span style={{ color: "#7c3aed", fontSize: 16, lineHeight: 1.4 }}>{b.icon}</span>
-                <span style={{ color: "#374151", fontSize: 13, lineHeight: 1.5, fontWeight: 500 }}>{b.text}</span>
+          <div style={{ fontSize: 11, color: "#10b981", fontWeight: 700, marginBottom: 12, letterSpacing: 1 }}>● IN STOCK</div>
+          <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 24 }}>$12.00</div>
+          <hr style={{ border: "none", borderTop: "1px solid #e5e7eb", margin: "0 0 24px" }} />
+          <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 12, letterSpacing: 1 }}>SHADE: {SHADES[activeShade].name}</div>
+          
+          <div style={{ display: "flex", justifyContent: "flex-start", gap: 8, marginBottom: 32, flexWrap: "wrap" }}>
+            {SHADES.map((swatch, idx) => (
+              <div 
+                key={idx} 
+                onClick={() => { if (swatch.status !== 'out') setActiveShade(idx); }}
+                style={{ 
+                  width: 36, height: 36, backgroundColor: swatch.color, 
+                  backgroundImage: `url("${swatch.texture}")`, backgroundSize: 'cover', backgroundPosition: 'center',
+                  border: activeShade === idx ? "2px solid #000" : "1px solid #e5e7eb", 
+                  position: "relative", borderRadius: 2, display: "flex", alignItems: "center", justifyContent: "center",
+                  cursor: swatch.status === 'out' ? "not-allowed" : "pointer",
+                  opacity: swatch.status === 'out' ? 0.6 : 1
+                }}
+              >
+                {activeShade === idx && <span style={{ color: "#000", fontSize: 18, zIndex: 2 }}>✓</span>}
+                {swatch.status === 'out' && <span style={{ position: "absolute", background: "rgba(255,255,255,0.9)", color: "#ef4444", fontSize: 9, fontWeight: 800, padding: "2px 4px", letterSpacing: 0.5, zIndex: 2 }}>OUT</span>}
+                {swatch.status !== 'out' && <span style={{ position: "absolute", bottom: 2, right: 2, background: "rgba(255,255,255,0.9)", color: "#111", fontSize: 8, fontWeight: 800, padding: "1px 3px", borderRadius: 2 }}>{swatch.stock}</span>}
               </div>
             ))}
-            <button style={{
-              marginTop: 16, padding: "12px 28px",
-              background: "linear-gradient(135deg, #7c3aed, #a78bfa)",
-              border: "none", borderRadius: 30,
-              color: "white", fontSize: 13, fontWeight: 700, cursor: "pointer",
-              boxShadow: "0 8px 32px rgba(167,139,250,0.3)",
-              pointerEvents: "auto",
-            }}>
-              Discover the Formula →
-            </button>
-          </div>
-        </div>
-
-        {/* Chapter 2 Content */}
-        <div style={{
-          position: "absolute",
-          left: "5%",
-          top: "50%",
-          width: "90%",
-          maxWidth: 320,
-          transform: `translateY(-50%) ${chapter === 2 ? 'translateX(0)' : 'translateX(-40px)'}`,
-          opacity: chapter === 2 ? 1 : 0,
-          transition: "opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1), transform 0.7s cubic-bezier(0.16, 1, 0.3, 1)",
-          background: "#ffffff",
-          borderRadius: 16,
-          padding: 24,
-          boxShadow: "0 20px 40px rgba(0,0,0,0.1), 0 1px 3px rgba(0,0,0,0.05)",
-          pointerEvents: chapter === 2 ? "auto" : "none",
-          display: "flex",
-          flexDirection: "column",
-        }}>
-          {/* Chapter Label */}
-          <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 2, color: "#64748b", marginBottom: 16 }}>STORE LOCATIONS</div>
-          
-          <div style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer", marginBottom: 24, width: "fit-content" }}>
-            <div style={{ width: 24, height: 24, borderRadius: "50%", border: "1px solid #e2e8f0", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "#64748b" }}>
-              -
-            </div>
-            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1.5, color: "#64748b" }}>BACK TO LIST</div>
           </div>
 
-          <h2 style={{ fontSize: 24, fontWeight: 300, margin: "0 0 12px 0", letterSpacing: 2, color: "#111827", fontFamily: "Times New Roman, serif" }}>
-            {shop.name.toUpperCase()}
-          </h2>
-          
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-            <span style={{ background: "#111827", color: "white", fontSize: 9, fontWeight: 800, padding: "4px 8px", borderRadius: 12, letterSpacing: 1 }}>
-              {shop.status}
-            </span>
-          </div>
-          
-          <div style={{ fontSize: 13, color: "#64748b", fontWeight: 500, marginBottom: 24 }}>
-            {shop.hours}
-          </div>
-
-          <hr style={{ border: "none", borderTop: "1px solid #f1f5f9", margin: "0 0 24px 0" }} />
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 20, marginBottom: 24 }}>
-            <div style={{ display: "flex", alignItems: "flex-start", gap: 16 }}>
-              <span style={{ fontSize: 18 }}>📍</span>
-              <div>
-                <div style={{ fontSize: 13, color: "#111827", fontWeight: 600, marginBottom: 6 }}>
-                  {shop.name} {shop.branch}
-                </div>
-                {shop.tag && (
-                  <span style={{ border: "1px solid #cbd5e1", color: "#64748b", fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 2, letterSpacing: 0.5 }}>
-                    {shop.tag}
-                  </span>
-                )}
-              </div>
-            </div>
-            
-            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-              <span style={{ fontSize: 18 }}>📞</span>
-              <div style={{ fontSize: 14, color: "#111827", fontWeight: 600 }}>{shop.phone}</div>
-            </div>
-          </div>
-
-          <button style={{
-            width: "100%",
-            background: "#111827",
-            color: "white",
-            border: "none",
-            padding: "16px",
-            fontSize: 11,
-            fontWeight: 800,
-            letterSpacing: 2,
-            cursor: "pointer",
-            borderRadius: 4,
-            transition: "background 0.2s ease"
-          }}
-          onMouseOver={(e) => e.target.style.background = "#334155"}
-          onMouseOut={(e) => e.target.style.background = "#111827"}
-          >
-            GET DIRECTIONS
+          <button style={{ width: "100%", padding: "18px", background: "#000", color: "#fff", border: "none", fontSize: 12, fontWeight: 700, letterSpacing: 2, display: "flex", justifyContent: "center", alignItems: "center", gap: 12, cursor: "pointer", marginBottom: 16 }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path></svg> ADD TO CART
           </button>
-        </div>
-
-        <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: "rgba(0,0,0,0.05)" }}>
-          <div style={{
-            height: "100%",
-            background: "linear-gradient(90deg, #7c3aed, #a78bfa)",
-            width: `${((chapter + 1) / 3) * 100}%`,
-            transition: "width 0.4s ease",
-          }} />
-        </div>
-
-        <div style={{
-          position: "absolute", top: 0, left: 0, right: 0,
-          display: "flex", justifyContent: "space-between", alignItems: "center",
-          padding: "16px 20px",
-          background: "linear-gradient(to bottom, rgba(255,255,255,0.9), transparent)",
-        }}>
-          <div style={{
-            fontSize: 16, fontWeight: 800, letterSpacing: -0.5,
-            background: "linear-gradient(135deg, #111827, #7c3aed)",
-            WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
-          }}>BARE</div>
-          <div style={{ display: "flex", gap: 16, color: "#64748b", fontSize: 12 }}>
-            {["Products", "Story", "Stores"].map((t, i) => (
-              <span key={i} style={{ color: chapter === i ? "#7c3aed" : "#64748b", transition: "color 0.3s", fontWeight: chapter === i ? 700 : 500 }}>{t}</span>
-            ))}
-          </div>
+          <div style={{ fontSize: 10, color: "#64748b", marginBottom: 32, letterSpacing: 0.5 }}>• FREE DELIVERY OVER $50</div>
+          <div style={{ borderTop: "1px solid #e5e7eb", padding: "16px 0", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, fontWeight: 700, cursor: "pointer", letterSpacing: 1 }}><div style={{ display: "flex", gap: 16 }}><span>+</span> <span>DETAILS</span></div><span style={{ transform: "scaleY(0.7)" }}>V</span></div>
+          <div style={{ borderTop: "1px solid #e5e7eb", borderBottom: "1px solid #e5e7eb", padding: "16px 0", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, fontWeight: 700, cursor: "pointer", letterSpacing: 1 }}><div style={{ display: "flex", gap: 16 }}><span>+</span> <span>SHIPPING & RETURNS</span></div><span style={{ transform: "scaleY(0.7)" }}>V</span></div>
         </div>
       </div>
+
+      <div style={{ position: "absolute", top: 0, left: 0, right: 0, display: "flex", justifyContent: "center", alignItems: "center", padding: "16px 20px", background: "none", zIndex: 50, pointerEvents: "none" }}>
+        <div style={{ fontSize: 28, fontWeight: 400, letterSpacing: 1, color: "#111827", fontFamily: "'Times New Roman', Times, serif" }}>BARE</div>
+      </div>
+      {!isMobile && (
+        <div style={{ position: "absolute", top: 0, right: 0, display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 40px", zIndex: 50 }}>
+          <div style={{ display: "flex", gap: 24, color: "#64748b", fontSize: 14, pointerEvents: "auto" }}>
+            {["Products", "Our Story", "Our Stores"].map((t, i) => (<span key={i} style={{ color: i === 0 ? "#111827" : "inherit", fontWeight: i === 0 ? 600 : 400, cursor: "pointer" }}>{t}</span>))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

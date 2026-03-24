@@ -46,7 +46,7 @@ function createLabelTexture(text, hexColor) {
   return texture;
 }
 
-function useThreeScene(canvasRef, dragRef, reducedMotion, threeContext, activeShade, setLoadProgress, setIsLoading) {
+function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion, threeContext, activeShade, setLoadProgress, setIsLoading) {
   const sceneRef = useRef(null);
   const startedRef = useRef(false);
   const texturesRef = useRef({ powder: {}, label: {} });
@@ -78,17 +78,14 @@ function useThreeScene(canvasRef, dragRef, reducedMotion, threeContext, activeSh
     const camera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clientHeight, 0.1, 100);
     camera.position.set(0, 0, 5);
 
-    // ── LOADING MANAGER ──
     const manager = new THREE.LoadingManager();
     manager.onProgress = (url, itemsLoaded, itemsTotal) => {
       setLoadProgress(Math.round((itemsLoaded / itemsTotal) * 100));
     };
     manager.onLoad = () => {
-      // Add slight delay before fading out to ensure textures are uploaded to GPU
       setTimeout(() => setIsLoading(false), 600);
     };
 
-    // 1. Load Textures with Manager
     const tl = new THREE.TextureLoader(manager);
     SHADES.forEach((shade, i) => {
        if (shade.texture) {
@@ -104,7 +101,6 @@ function useThreeScene(canvasRef, dragRef, reducedMotion, threeContext, activeSh
     const pmremGenerator = new THREE.PMREMGenerator(renderer);
     pmremGenerator.compileEquirectangularShader();
     
-    // 2. Load HDR with Manager
     new RGBELoader(manager).load('/hdr/studio_small_08_1k.hdr', (texture) => {
       const envMap = pmremGenerator.fromEquirectangular(texture).texture;
       scene.environment = envMap;
@@ -150,76 +146,138 @@ function useThreeScene(canvasRef, dragRef, reducedMotion, threeContext, activeSh
       };
     }
 
-    // 3. Load GLTF with Manager
     const loader = new GLTFLoader(manager);
-    loader.load('/product.glb', (gltf) => {
-        const model = gltf.scene;
-        const nodes = {};
-        model.traverse((child) => { if (child.name) nodes[child.name] = child; });
-        
-        const box = new THREE.Box3().setFromObject(model);
-        const center = box.getCenter(new THREE.Vector3());
-        model.position.sub(center);
-        
-        model.traverse((child) => {
-          if (child.isMesh && child.material) {
-            const mat = child.material;
-            if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial) {
-              mat.metalness = Math.max(mat.metalness !== undefined ? mat.metalness : 0, 0.7);
-              mat.roughness = Math.min(mat.roughness !== undefined ? mat.roughness : 1, 0.25);
-              mat.envMapIntensity = 1.2;
-              if (mat.map) {
-                if (mat.map.colorSpace !== undefined) mat.map.colorSpace = THREE.SRGBColorSpace;
-                else mat.map.encoding = 3001; 
+    Promise.all(['/product.glb', '/product2.glb'].map((path, index) => {
+      return new Promise((resolve) => {
+        loader.load(path, (gltf) => {
+            const model = gltf.scene;
+            const nodes = {};
+            model.traverse((child) => { if (child.name) nodes[child.name] = child; });
+            
+            const box = new THREE.Box3().setFromObject(model);
+            const center = box.getCenter(new THREE.Vector3());
+            model.position.sub(center);
+            
+            model.traverse((child) => {
+              if (child.isMesh && child.material) {
+                const mat = child.material;
+                if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial) {
+                  mat.metalness = Math.max(mat.metalness !== undefined ? mat.metalness : 0, 0.7);
+                  mat.roughness = Math.min(mat.roughness !== undefined ? mat.roughness : 1, 0.25);
+                  mat.envMapIntensity = 1.2;
+                  if (mat.map) {
+                    if (mat.map.colorSpace !== undefined) mat.map.colorSpace = THREE.SRGBColorSpace;
+                    else mat.map.encoding = 3001; 
+                  }
+                }
               }
+            });
+
+            let cap = null;
+            if (index === 0) {
+                cap = nodes["CAP: [BLUSH POWDER].010"] || nodes["CAP"] || nodes["Cap.001"] || nodes["Cap"] || nodes["cap"] || nodes["Lid"];
+                if (!cap) model.traverse((child) => { if (child.isMesh && (child.name.toLowerCase().includes('cap') || child.name.toLowerCase().includes('lid'))) cap = child; });
+            } else if (index === 1) {
+                cap = nodes["Cap"];
+                if (!cap) model.traverse((child) => { if (child.name === 'Cap' || child.name === 'CAP') cap = child; });
             }
+
+            if (cap) { 
+                cap.userData.originalY = cap.position.y; 
+                cap.userData.originalRotX = cap.rotation.x; 
+            }
+
+            let powderMesh = null;
+            let labelMesh = null;
+            let creamMesh = null;
+
+            if (index === 0) { 
+                model.traverse((child) => {
+                    if (child.isMesh) {
+                        if (child.name === 'Body' || child.name.includes('Mesh.008') || child.name.includes('Mesh_008') || (child.parent && child.parent.name === 'Body')) {
+                            if (Array.isArray(child.material)) {
+                                const matIdx = child.material.findIndex(m => !m.name.toLowerCase().includes('chrome'));
+                                if (matIdx !== -1) {
+                                    child.material = [...child.material];
+                                    child.material[matIdx] = new THREE.MeshStandardMaterial({
+                                        color: 0xffffff,
+                                        roughness: 0.9,
+                                        metalness: 0.1
+                                    });
+                                    child.userData.coloredMatIdx = matIdx;
+                                    labelMesh = child;
+                                    powderMesh = child; 
+                                }
+                            }
+                        }
+
+                        if (child.name === 'PowderMesh' || child.name.includes('mesh.086') || child.name.toLowerCase() === 'powder') {
+                            powderMesh = child;
+                            powderMesh.material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0.1 });
+                        }
+                        if (child.name === 'label.011' || child.name.includes('label') || child.name.includes('mesh.085')) {
+                            if (!labelMesh) {
+                                labelMesh = child;
+                                labelMesh.material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5, metalness: 0.1 });
+                            }
+                        }
+                    }
+                });
+            }
+
+            if (index === 1) {
+                model.traverse((child) => {
+                    if (child.isMesh) {
+                        if (Array.isArray(child.material)) {
+                            const matIdx = child.material.findIndex(m => {
+                                const mName = m.name.toLowerCase();
+                                return !mName.includes('chrome') && !mName.includes('silver');
+                            });
+                            
+                            if (matIdx !== -1) {
+                                child.material = [...child.material]; 
+                                child.material[matIdx] = new THREE.MeshStandardMaterial({
+                                    color: new THREE.Color(SHADES[0].color),
+                                    roughness: 0.3,
+                                    metalness: 0.05
+                                });
+                                child.userData.creamMatIdx = matIdx;
+                                creamMesh = child;
+                            }
+                        } else if (child.name.includes('Cylinder.019') || child.name.toLowerCase().includes('cream')) {
+                            creamMesh = child;
+                            creamMesh.material = new THREE.MeshStandardMaterial({
+                                color: new THREE.Color(SHADES[0].color),
+                                roughness: 0.3,
+                                metalness: 0.05
+                            });
+                        }
+                    }
+                });
+            }
+
+            const wrapper = new THREE.Group();
+            wrapper.userData.isOpen = false;
+            wrapper.add(model);
+            wrapper.scale.setScalar(0);
+            wrapper.position.y = -2;
+            group.add(wrapper);
+            
+            resolve({ index, wrapper, cap, powderMesh, labelMesh, creamMesh });
+          }, 
+          undefined, 
+          (error) => {
+            const fallbackMesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.5, 0.8, 4, 16), new THREE.MeshStandardMaterial({ color: 0x111827 }));
+            fallbackMesh.scale.setScalar(0); fallbackMesh.position.y = -2;
+            const wrapper = new THREE.Group(); wrapper.userData.isOpen = false; wrapper.add(fallbackMesh); group.add(wrapper);
+            resolve({ index, wrapper, cap: null, powderMesh: null, labelMesh: null, creamMesh: null });
           }
-        });
-
-        let cap = nodes["CAP: [BLUSH POWDER].010"] || nodes["CAP"] || nodes["Cap.001"] || nodes["Cap"] || nodes["cap"] || nodes["Lid"];
-        if (!cap) model.traverse((child) => { if (child.isMesh && (child.name.toLowerCase().includes('cap') || child.name.toLowerCase().includes('lid'))) cap = child; });
-        if (cap) { cap.userData.originalY = cap.position.y; cap.userData.originalRotX = cap.rotation.x; }
-
-        let powderMesh = null;
-        let labelMesh = null;
-
-        model.traverse((child) => {
-            if (child.isMesh) {
-                if (child.name === 'PowderMesh' || child.name.includes('mesh.086') || child.name.toLowerCase().includes('powder')) {
-                    powderMesh = child;
-                }
-                if (child.name === 'label.011' || child.name.includes('label') || child.name.includes('mesh.085')) {
-                    labelMesh = child;
-                }
-            }
-        });
-
-        if (powderMesh) {
-            powderMesh.material = new THREE.MeshStandardMaterial({
-                color: 0xffffff,
-                roughness: 0.9,
-                metalness: 0.1
-            });
-        }
-        
-        if (labelMesh) {
-            labelMesh.material = new THREE.MeshStandardMaterial({
-                color: 0xffffff,
-                roughness: 0.5,
-                metalness: 0.1
-            });
-        }
-
-        const wrapper = new THREE.Group();
-        wrapper.userData.isOpen = false;
-        wrapper.add(model);
-        wrapper.scale.setScalar(0);
-        wrapper.position.y = -2;
-        group.add(wrapper);
-        
-        if (sceneRef.current) sceneRef.current.products = [{ index: 0, wrapper, cap, powderMesh, labelMesh }];
-      }
-    );
+        );
+      });
+    })).then((results) => {
+      results.sort((a, b) => a.index - b.index);
+      if (sceneRef.current) sceneRef.current.products = results;
+    });
 
     sceneRef.current = { renderer, scene, camera, group, rimLight, products: [] };
 
@@ -236,28 +294,66 @@ function useThreeScene(canvasRef, dragRef, reducedMotion, threeContext, activeSh
       raf = requestAnimationFrame(animate);
       t += 0.01;
 
+      const prog = scrollProgress.current || 0;
       const d = dragRef.current;
       const isMobile = window.innerWidth < 768;
 
-      if (sceneRef.current?.products?.[0]) {
-          const product = sceneRef.current.products[0];
-          const activeIndex = currentShadeRef.current;
-          
-          if (product.powderMesh) {
-              const targetPowderTex = texturesRef.current.powder[activeIndex];
-              if (targetPowderTex && product.powderMesh.material.map !== targetPowderTex) {
-                  product.powderMesh.material.map = targetPowderTex;
-                  product.powderMesh.material.needsUpdate = true;
+      let activeIndex = prog < 0.5 ? 0 : 1;
+
+      if (sceneRef.current?.products) {
+          const currentShade = currentShadeRef.current;
+
+          sceneRef.current.products.forEach((prod, i) => {
+              if (prod.labelMesh && prod.powderMesh && prod.labelMesh === prod.powderMesh) {
+                  const targetLabelTex = texturesRef.current.label[currentShade];
+                  if (targetLabelTex) {
+                      if (prod.labelMesh.userData.coloredMatIdx !== undefined) {
+                          const mat = prod.labelMesh.material[prod.labelMesh.userData.coloredMatIdx];
+                          if (mat.map !== targetLabelTex) {
+                              mat.map = targetLabelTex;
+                              mat.color.setHex(0xffffff); 
+                              mat.needsUpdate = true;
+                          }
+                      } else if (prod.labelMesh.material.map !== targetLabelTex) {
+                          prod.labelMesh.material.map = targetLabelTex;
+                          prod.labelMesh.material.color.setHex(0xffffff);
+                          prod.labelMesh.material.needsUpdate = true;
+                      }
+                  }
+              } else {
+                  if (prod.powderMesh) {
+                      if (i === 0) {
+                          const targetPowderTex = texturesRef.current.powder[currentShade];
+                          if (targetPowderTex && prod.powderMesh.material.map !== targetPowderTex) {
+                              prod.powderMesh.material.map = targetPowderTex;
+                              prod.powderMesh.material.needsUpdate = true;
+                          }
+                      }
+                  }
+                  if (prod.creamMesh && i === 1) {
+                      const targetColor = new THREE.Color(SHADES[currentShade].color);
+                      if (prod.creamMesh.userData.creamMatIdx !== undefined) {
+                          const mat = prod.creamMesh.material[prod.creamMesh.userData.creamMatIdx];
+                          if (!mat.color.equals(targetColor)) {
+                              mat.color.copy(targetColor);
+                              mat.needsUpdate = true;
+                          }
+                      } else {
+                          if (!prod.creamMesh.material.color.equals(targetColor)) {
+                              prod.creamMesh.material.color.copy(targetColor);
+                              prod.creamMesh.material.needsUpdate = true;
+                          }
+                      }
+                  }
+                  if (prod.labelMesh) {
+                      const targetLabelTex = texturesRef.current.label[currentShade];
+                      if (targetLabelTex && prod.labelMesh.material.map !== targetLabelTex) {
+                          prod.labelMesh.material.map = targetLabelTex;
+                          prod.labelMesh.material.needsUpdate = true;
+                      }
+                  }
               }
-          }
-          
-          if (product.labelMesh) {
-              const targetLabelTex = texturesRef.current.label[activeIndex];
-              if (targetLabelTex && product.labelMesh.material.map !== targetLabelTex) {
-                  product.labelMesh.material.map = targetLabelTex;
-                  product.labelMesh.material.needsUpdate = true;
-              }
-          }
+          });
       }
 
       if (!d.dragActive && !reducedMotion) {
@@ -266,8 +362,9 @@ function useThreeScene(canvasRef, dragRef, reducedMotion, threeContext, activeSh
       }
       d.rotOffsetX = Math.max(-0.35, Math.min(0.35, d.rotOffsetX));
 
+      // ── Responsive Camera & Position ──
       const targetX = isMobile ? 0 : -1.8; 
-      const targetCamZ = isMobile ? 6 : 5;
+      const targetCamZ = isMobile ? 6.5 : 5; // Pull camera back slightly on mobile
       const targetRimInt = 1.5;
       rimLight.color.setHSL(0.75, 0.9, 0.6);
 
@@ -277,27 +374,36 @@ function useThreeScene(canvasRef, dragRef, reducedMotion, threeContext, activeSh
       rimLight.intensity = THREE.MathUtils.lerp(rimLight.intensity, targetRimInt, lerpSpeed);
 
       if (sceneRef.current && sceneRef.current.products.length > 0) {
-        const prod = sceneRef.current.products[0];
-        const baseScale = 3.5 * (isMobile ? 0.75 : 1.0);
-        
-        let pTargetScale = baseScale;
-        let pTargetY = Math.sin(t * 0.8) * 0.08 + (isMobile ? 1.8 : 0);
-        let capTargetY = prod.cap ? prod.cap.userData.originalY : 0;
-        let capTargetRotX = prod.cap ? prod.cap.userData.originalRotX : 0;
-        let targetRotZ = 0;
+        sceneRef.current.products.forEach((prod, i) => {
+            const isActiveModel = (activeIndex === i);
+            
+            // Adjust base scale for Mobile to perfectly frame the top half
+            const baseScale = (i === 0 ? 3.5 : 0.8) * (isMobile ? 0.8 : 1.0);
+            
+            let pTargetScale = isActiveModel ? baseScale : 0;
+            // Shift model UP on mobile so it sits cleanly above the white UI panel
+            let pTargetY = isActiveModel ? Math.sin(t * 0.8) * 0.08 + (isMobile ? 1.8 : 0) : -2;
+            let capTargetY = prod.cap ? prod.cap.userData.originalY : 0;
+            let capTargetRotX = prod.cap ? prod.cap.userData.originalRotX : 0;
 
-        if (prod.cap && prod.wrapper.userData.isOpen) {
-            capTargetRotX = prod.cap.userData.originalRotX - 1.5; 
-        }
+            if (prod.cap && prod.wrapper.userData.isOpen) {
+                if (i === 0) {
+                    capTargetRotX = prod.cap.userData.originalRotX - 1.5; 
+                } else if (i === 1) {
+                    capTargetY = prod.cap.userData.originalY + 2.5; 
+                }
+            }
 
-        prod.wrapper.scale.setScalar(THREE.MathUtils.lerp(prod.wrapper.scale.x, pTargetScale, lerpSpeed));
-        prod.wrapper.position.y = THREE.MathUtils.lerp(prod.wrapper.position.y, pTargetY, lerpSpeed);
-        prod.wrapper.rotation.z = THREE.MathUtils.lerp(prod.wrapper.rotation.z, targetRotZ, lerpSpeed);
+            prod.wrapper.scale.setScalar(THREE.MathUtils.lerp(prod.wrapper.scale.x, pTargetScale, lerpSpeed));
+            prod.wrapper.position.y = THREE.MathUtils.lerp(prod.wrapper.position.y, pTargetY, lerpSpeed);
 
-        if (prod.cap) {
-          prod.cap.position.y = THREE.MathUtils.lerp(prod.cap.position.y, capTargetY, lerpSpeed * 1.5);
-          prod.cap.rotation.x = THREE.MathUtils.lerp(prod.cap.rotation.x, capTargetRotX, lerpSpeed * 1.5);
-        }
+            if (prod.cap) {
+                prod.cap.position.y = THREE.MathUtils.lerp(prod.cap.position.y, capTargetY, lerpSpeed * 1.5);
+                if (i === 0) {
+                    prod.cap.rotation.x = THREE.MathUtils.lerp(prod.cap.rotation.x, capTargetRotX, lerpSpeed * 1.5);
+                }
+            }
+        });
       }
 
       if (d.currentSpinOffset === undefined) d.currentSpinOffset = 0;
@@ -328,15 +434,17 @@ function useThreeScene(canvasRef, dragRef, reducedMotion, threeContext, activeSh
 }
 
 export default function App() {
+  const scrollRef = useRef(null);
   const canvasRef = useRef(null);
   const interactRef = useRef(null);
   const threeContext = useRef({});
   
+  const scrollProgress = useRef(0);
+  const [chapter, setChapter] = useState(0);
   const [showHint, setShowHint] = useState(true);
   const [isMobile, setIsMobile] = useState(typeof window !== "undefined" ? window.innerWidth < 768 : false);
   const [activeShade, setActiveShade] = useState(0); 
   
-  // Loading States
   const [loadProgress, setLoadProgress] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -349,7 +457,7 @@ export default function App() {
     velX: 0, velY: 0, lastTap: 0, tapStartX: 0, tapStartY: 0, tapStartTime: 0
   });
 
-  useThreeScene(canvasRef, dragRef, reducedMotion, threeContext, activeShade, setLoadProgress, setIsLoading);
+  useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion, threeContext, activeShade, setLoadProgress, setIsLoading);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768);
@@ -360,6 +468,20 @@ export default function App() {
   useEffect(() => {
     const timer = setTimeout(() => setShowHint(false), 5000);
     return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+
+    const onScroll = () => {
+      const max = container.scrollHeight - container.clientHeight;
+      const prog = max > 0 ? container.scrollTop / max : 0;
+      scrollProgress.current = prog;
+      setChapter(prog < 0.5 ? 0 : 1);
+    };
+    container.addEventListener("scroll", onScroll, { passive: true });
+    return () => container.removeEventListener("scroll", onScroll);
   }, []);
 
   const handlePointerDown = (e) => {
@@ -392,8 +514,45 @@ export default function App() {
     if (interactRef.current) { try { interactRef.current.releasePointerCapture(e.pointerId); } catch (err) { } }
   };
 
+  // Swatch Component to perfectly match your screenshot
+  const RenderSwatches = () => (
+    <div style={{ display: "flex", justifyContent: "flex-start", gap: 10, marginBottom: 32, flexWrap: "wrap" }}>
+      {SHADES.map((swatch, idx) => {
+        const isOut = swatch.status === 'out';
+        const isActive = activeShade === idx;
+        return (
+          <div 
+            key={idx} 
+            onClick={() => { if (!isOut) setActiveShade(idx); }}
+            style={{ 
+              width: 44, height: 44, backgroundColor: swatch.color, 
+              backgroundImage: `url("${swatch.texture}")`, backgroundSize: 'cover', backgroundPosition: 'center',
+              border: isActive ? "2px solid #000" : "1px solid #e5e7eb", 
+              position: "relative", borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center",
+              cursor: isOut ? "not-allowed" : "pointer",
+            }}
+          >
+            {isActive && <span style={{ color: "#000", fontSize: 24, zIndex: 2, fontWeight: 300 }}>✓</span>}
+            
+            {isOut && (
+              <div style={{ position: "absolute", inset: 0, background: "rgba(255,255,255,0.7)", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 3 }}>
+                <span style={{ border: "2px solid #fca5a5", color: "#fca5a5", fontSize: 10, fontWeight: 800, padding: "2px 4px", borderRadius: 12, letterSpacing: 0.5 }}>OUT</span>
+              </div>
+            )}
+            
+            {!isOut && (
+              <span style={{ position: "absolute", bottom: 0, right: 0, background: "#fff", borderTopLeftRadius: 4, border: "1px solid #e5e7eb", borderRight: "none", borderBottom: "none", color: "#111", fontSize: 10, fontWeight: 700, padding: "1px 4px" }}>
+                {swatch.stock}
+              </span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+
   return (
-    <div style={{ width: "100%", height: "100vh", background: "#ffffff", fontFamily: "'Segoe UI', system-ui, sans-serif", overflow: "hidden", position: "relative" }}>
+    <div style={{ width: "100%", height: "100vh", background: "#f8fafc", fontFamily: "'Segoe UI', system-ui, sans-serif", overflow: "hidden", position: "relative" }}>
       
       {/* ── LOADING OVERLAY ── */}
       <div style={{
@@ -409,81 +568,112 @@ export default function App() {
         <div style={{ fontSize: 10, marginTop: 12, letterSpacing: 2, color: '#64748b', fontWeight: 600 }}>{loadProgress}%</div>
       </div>
 
-      <div ref={interactRef} style={{ position: "absolute", inset: 0, zIndex: 15, touchAction: "none" }} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} />
+      {/* ── SCROLL CONTAINER ── */}
+      <div ref={scrollRef} style={{ position: "absolute", inset: 0, overflowY: "auto", overflowX: "hidden", zIndex: 10, pointerEvents: "auto", WebkitOverflowScrolling: "touch" }}>
+        <div ref={interactRef} style={{ position: "sticky", top: 0, left: 0, width: "100%", height: "100vh", zIndex: 15, touchAction: "pan-y" }} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} />
+        <div style={{ height: "200vh", pointerEvents: "none" }} />
+      </div>
 
       <canvas ref={canvasRef} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", zIndex: 1, pointerEvents: "none" }} />
 
-      <div style={{ position: "absolute", top: "55%", left: "50%", transform: "translate(-50%, -50%)", opacity: showHint && !isMobile && !isLoading ? 1 : 0, transition: "opacity 0.8s ease", pointerEvents: "none", zIndex: 30 }}>
+      {/* Helper Interaction Hint */}
+      <div style={{ position: "absolute", top: "45%", left: "50%", transform: "translate(-50%, -50%)", opacity: showHint && !isMobile && !isLoading ? 1 : 0, transition: "opacity 0.8s ease", pointerEvents: "none", zIndex: 30 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.9)', padding: '8px 16px', borderRadius: 20, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
           <span style={{ fontSize: 16 }}>⟷👆</span><span style={{ fontSize: 11, fontWeight: 700, color: '#111827', letterSpacing: 1 }}>DRAG OR TAP</span>
         </div>
       </div>
 
+      {/* ── CHAPTER 0: Shimmer Blush Powder ── */}
       <div style={{
         position: "absolute",
         inset: isMobile ? "auto 0 0 0" : "0 0 0 0",
+        height: isMobile ? "55vh" : "100%",
         display: "flex", flexDirection: "column",
         justifyContent: isMobile ? "flex-start" : "center", alignItems: isMobile ? "center" : "flex-end", 
         paddingRight: isMobile ? 0 : "10vw",
-        padding: isMobile ? "24px 24px 48px 24px" : 0,
+        padding: isMobile ? "32px 24px 24px 24px" : "0 10vw 0 0",
         background: isMobile ? "#ffffff" : "transparent",
-        zIndex: 20, pointerEvents: "none",
-        opacity: isLoading ? 0 : 1, transform: isLoading ? "translateY(24px)" : "translateY(0)", transition: "opacity 1.2s ease 0.4s, transform 1.2s ease 0.4s"
+        zIndex: 20, 
+        pointerEvents: "none",
+        opacity: chapter === 0 && !isLoading ? 1 : 0, 
+        transform: !isLoading ? (chapter === 0 ? "translateY(0)" : "translateY(24px)") : "translateY(24px)", 
+        transition: "opacity 0.7s ease, transform 0.7s ease"
       }}>
         <div style={{ 
-          width: "100%", maxWidth: "420px", color: "#111", textAlign: "left", 
-          fontFamily: "'Century Gothic', 'Helvetica Neue', sans-serif", 
-          pointerEvents: "auto", 
+          width: "100%", maxWidth: isMobile ? "100%" : "420px", color: "#111", textAlign: "left", fontFamily: "'Century Gothic', 'Helvetica Neue', sans-serif",
+          pointerEvents: chapter === 0 && !isLoading ? "auto" : "none",
         }}>
-          <h1 style={{ fontSize: 20, fontWeight: 400, margin: "0 0 16px", letterSpacing: 0.5 }}>BARE Shimmer Blush Powder</h1>
+          <h1 style={{ fontSize: 24, fontWeight: 300, margin: "0 0 16px", letterSpacing: 0.5, color: "#111827" }}>BARE Shimmer Blush Powder</h1>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 12, marginBottom: 12 }}>
-            <span style={{ background: "#000", color: "#fff", fontSize: 9, fontWeight: 700, padding: "4px 8px", letterSpacing: 1 }}>BESTSELLER</span>
+            <span style={{ background: "#000", color: "#fff", fontSize: 10, fontWeight: 700, padding: "6px 10px", letterSpacing: 1 }}>BESTSELLER</span>
           </div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 8, marginBottom: 12 }}>
-            <span style={{ fontSize: 12, letterSpacing: 2 }}>★★★★★</span> <span style={{ fontSize: 11, color: "#666", textDecoration: "underline" }}>(3) Rate</span>
+            <span style={{ fontSize: 14, letterSpacing: 2 }}>★★★★★</span> <span style={{ fontSize: 12, color: "#64748b", textDecoration: "underline" }}>(3) Rate</span>
           </div>
-          <div style={{ fontSize: 11, color: "#10b981", fontWeight: 700, marginBottom: 12, letterSpacing: 1 }}>● IN STOCK</div>
-          <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 24 }}>$12.00</div>
-          <hr style={{ border: "none", borderTop: "1px solid #e5e7eb", margin: "0 0 24px" }} />
-          <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 12, letterSpacing: 1 }}>SHADE: {SHADES[activeShade].name}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 16 }}>
+            <span style={{ color: "#10b981", fontSize: 16 }}>●</span><span style={{ color: "#10b981", fontSize: 12, fontWeight: 700, letterSpacing: 1 }}>IN STOCK</span>
+          </div>
+          <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 24 }}>$12.00</div>
+          <hr style={{ border: "none", borderTop: "1px solid #e2e8f0", margin: "0 0 24px" }} />
+          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 16, letterSpacing: 1, textTransform: "uppercase" }}>SHADE: {SHADES[activeShade].name}</div>
           
-          <div style={{ display: "flex", justifyContent: "flex-start", gap: 8, marginBottom: 32, flexWrap: "wrap" }}>
-            {SHADES.map((swatch, idx) => (
-              <div 
-                key={idx} 
-                onClick={() => { if (swatch.status !== 'out') setActiveShade(idx); }}
-                style={{ 
-                  width: 36, height: 36, backgroundColor: swatch.color, 
-                  backgroundImage: `url("${swatch.texture}")`, backgroundSize: 'cover', backgroundPosition: 'center',
-                  border: activeShade === idx ? "2px solid #000" : "1px solid #e5e7eb", 
-                  position: "relative", borderRadius: 2, display: "flex", alignItems: "center", justifyContent: "center",
-                  cursor: swatch.status === 'out' ? "not-allowed" : "pointer",
-                  opacity: swatch.status === 'out' ? 0.6 : 1
-                }}
-              >
-                {activeShade === idx && <span style={{ color: "#000", fontSize: 18, zIndex: 2 }}>✓</span>}
-                {swatch.status === 'out' && <span style={{ position: "absolute", background: "rgba(255,255,255,0.9)", color: "#ef4444", fontSize: 9, fontWeight: 800, padding: "2px 4px", letterSpacing: 0.5, zIndex: 2 }}>OUT</span>}
-                {swatch.status !== 'out' && <span style={{ position: "absolute", bottom: 2, right: 2, background: "rgba(255,255,255,0.9)", color: "#111", fontSize: 8, fontWeight: 800, padding: "1px 3px", borderRadius: 2 }}>{swatch.stock}</span>}
-              </div>
-            ))}
-          </div>
+          <RenderSwatches />
 
-          <button style={{ width: "100%", padding: "18px", background: "#000", color: "#fff", border: "none", fontSize: 12, fontWeight: 700, letterSpacing: 2, display: "flex", justifyContent: "center", alignItems: "center", gap: 12, cursor: "pointer", marginBottom: 16 }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path></svg> ADD TO CART
+          <button style={{ width: "100%", padding: "20px", background: "#000", color: "#fff", border: "none", fontSize: 13, fontWeight: 700, letterSpacing: 2, display: "flex", justifyContent: "center", alignItems: "center", gap: 12, cursor: "pointer", borderRadius: 2 }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path></svg> ADD TO CART
           </button>
-          <div style={{ fontSize: 10, color: "#64748b", marginBottom: 32, letterSpacing: 0.5 }}>• FREE DELIVERY OVER $50</div>
-          <div style={{ borderTop: "1px solid #e5e7eb", padding: "16px 0", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, fontWeight: 700, cursor: "pointer", letterSpacing: 1 }}><div style={{ display: "flex", gap: 16 }}><span>+</span> <span>DETAILS</span></div><span style={{ transform: "scaleY(0.7)" }}>V</span></div>
-          <div style={{ borderTop: "1px solid #e5e7eb", borderBottom: "1px solid #e5e7eb", padding: "16px 0", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, fontWeight: 700, cursor: "pointer", letterSpacing: 1 }}><div style={{ display: "flex", gap: 16 }}><span>+</span> <span>SHIPPING & RETURNS</span></div><span style={{ transform: "scaleY(0.7)" }}>V</span></div>
         </div>
       </div>
 
-      <div style={{ position: "absolute", top: 0, left: 0, right: 0, display: "flex", justifyContent: "center", alignItems: "center", padding: "16px 20px", background: "none", zIndex: 50, pointerEvents: "none" }}>
-        <div style={{ fontSize: 28, fontWeight: 400, letterSpacing: 1, color: "#111827", fontFamily: "'Times New Roman', Times, serif", opacity: isLoading ? 0 : 1, transition: "opacity 0.8s ease 0.4s" }}>BARE</div>
+      {/* ── CHAPTER 1: Creamy Blush Stick ── */}
+      <div style={{
+        position: "absolute",
+        inset: isMobile ? "auto 0 0 0" : "0 0 0 0",
+        height: isMobile ? "55vh" : "100%",
+        display: "flex", flexDirection: "column",
+        justifyContent: isMobile ? "flex-start" : "center", alignItems: isMobile ? "center" : "flex-end", 
+        paddingRight: isMobile ? 0 : "10vw",
+        padding: isMobile ? "32px 24px 24px 24px" : "0 10vw 0 0",
+        background: isMobile ? "#ffffff" : "transparent",
+        zIndex: 20, 
+        pointerEvents: "none", 
+        opacity: chapter === 1 && !isLoading ? 1 : 0, 
+        transform: !isLoading ? (chapter === 1 ? "translateY(0)" : "translateY(24px)") : "translateY(24px)", 
+        transition: "opacity 0.7s ease, transform 0.7s ease"
+      }}>
+        <div style={{ 
+          width: "100%", maxWidth: isMobile ? "100%" : "420px", color: "#111", textAlign: "left", fontFamily: "'Century Gothic', 'Helvetica Neue', sans-serif",
+          pointerEvents: chapter === 1 && !isLoading ? "auto" : "none",
+        }}>
+          <h1 style={{ fontSize: 24, fontWeight: 300, margin: "0 0 16px", letterSpacing: 0.5, color: "#111827" }}>BARE Creamy Blush Stick</h1>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 12, marginBottom: 12 }}>
+            <span style={{ background: "#000", color: "#fff", fontSize: 10, fontWeight: 700, padding: "6px 10px", letterSpacing: 1 }}>NEW RELEASE</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 8, marginBottom: 12 }}>
+            <span style={{ fontSize: 14, letterSpacing: 2 }}>★★★★★</span> <span style={{ fontSize: 12, color: "#64748b", textDecoration: "underline" }}>(12) Rate</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 16 }}>
+            <span style={{ color: "#10b981", fontSize: 16 }}>●</span><span style={{ color: "#10b981", fontSize: 12, fontWeight: 700, letterSpacing: 1 }}>IN STOCK</span>
+          </div>
+          <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 24 }}>$14.00</div>
+          <hr style={{ border: "none", borderTop: "1px solid #e2e8f0", margin: "0 0 24px" }} />
+          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 16, letterSpacing: 1, textTransform: "uppercase" }}>SHADE: {SHADES[activeShade].name}</div>
+          
+          <RenderSwatches />
+
+          <button style={{ width: "100%", padding: "20px", background: "#000", color: "#fff", border: "none", fontSize: 13, fontWeight: 700, letterSpacing: 2, display: "flex", justifyContent: "center", alignItems: "center", gap: 12, cursor: "pointer", borderRadius: 2 }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path></svg> ADD TO CART
+          </button>
+        </div>
+      </div>
+
+      <div style={{ position: "absolute", top: 0, left: 0, right: 0, display: "flex", justifyContent: "center", alignItems: "center", padding: "24px 20px", background: "none", zIndex: 50, pointerEvents: "none" }}>
+        <div style={{ fontSize: 32, fontWeight: 400, letterSpacing: 2, color: "#111827", fontFamily: "'Times New Roman', Times, serif", opacity: isLoading ? 0 : 1, transition: "opacity 0.8s ease 0.4s" }}>BARE</div>
       </div>
       {!isMobile && (
-        <div style={{ position: "absolute", top: 0, right: 0, display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 40px", zIndex: 50, opacity: isLoading ? 0 : 1, transition: "opacity 0.8s ease 0.4s" }}>
-          <div style={{ display: "flex", gap: 24, color: "#64748b", fontSize: 14, pointerEvents: "auto" }}>
-            {["Products", "Our Story", "Our Stores"].map((t, i) => (<span key={i} style={{ color: i === 0 ? "#111827" : "inherit", fontWeight: i === 0 ? 600 : 400, cursor: "pointer" }}>{t}</span>))}
+        <div style={{ position: "absolute", top: 0, right: 0, display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "28px 48px", zIndex: 50, opacity: isLoading ? 0 : 1, transition: "opacity 0.8s ease 0.4s" }}>
+          <div style={{ display: "flex", gap: 32, color: "#64748b", fontSize: 13, textTransform: "uppercase", letterSpacing: 1, pointerEvents: "auto" }}>
+            {["Products", "Our Story", "Our Stores"].map((t, i) => (<span key={i} style={{ color: i === 0 ? "#111827" : "inherit", fontWeight: i === 0 ? 700 : 500, cursor: "pointer" }}>{t}</span>))}
           </div>
         </div>
       )}

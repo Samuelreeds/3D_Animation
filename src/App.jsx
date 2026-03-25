@@ -46,10 +46,38 @@ function createLabelTexture(text, hexColor) {
   return texture;
 }
 
+function createSparkleNormalMap() {
+  const canvas = document.createElement('canvas');
+  const size = 512;
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const imgData = ctx.createImageData(size, size);
+  
+  for (let i = 0; i < imgData.data.length; i += 4) {
+      let r = 128, g = 128, b = 255; 
+      if (Math.random() > 0.5) { 
+          r = Math.random() * 255;
+          g = Math.random() * 255;
+      }
+      imgData.data[i] = r;
+      imgData.data[i+1] = g;
+      imgData.data[i+2] = b;
+      imgData.data[i+3] = 255;
+  }
+  
+  ctx.putImageData(imgData, 0, 0);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(3, 3);
+  return texture;
+}
+
 function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion, threeContext, activeShade, setLoadProgress, setIsLoading) {
   const sceneRef = useRef(null);
   const startedRef = useRef(false);
-  const texturesRef = useRef({ powder: {}, label: {} });
+  const texturesRef = useRef({ powder: {}, label: {}, sparkle: null });
   
   const currentShadeRef = useRef(activeShade);
   useEffect(() => {
@@ -97,6 +125,10 @@ function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion, threeC
        }
        texturesRef.current.label[i] = createLabelTexture(shade.name, shade.color);
     });
+
+    if (!texturesRef.current.sparkle) {
+        texturesRef.current.sparkle = createSparkleNormalMap();
+    }
 
     const pmremGenerator = new THREE.PMREMGenerator(renderer);
     pmremGenerator.compileEquirectangularShader();
@@ -147,7 +179,7 @@ function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion, threeC
     }
 
     const loader = new GLTFLoader(manager);
-    Promise.all(['/product.glb', '/product2.glb'].map((path, index) => {
+    Promise.all(['/product.glb', '/product2.glb', '/product3.glb'].map((path, index) => {
       return new Promise((resolve) => {
         loader.load(path, (gltf) => {
             const model = gltf.scene;
@@ -180,12 +212,38 @@ function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion, threeC
             } else if (index === 1) {
                 cap = nodes["Cap"];
                 if (!cap) model.traverse((child) => { if (child.name === 'Cap' || child.name === 'CAP') cap = child; });
+            } else if (index === 2) {
+                cap = nodes["bare cap"] || nodes["bare_cap"];
+                if (!cap) model.traverse((child) => { if (child.name.toLowerCase().includes('cap')) cap = child; });
+                
+                model.traverse((child) => {
+                    if (child.isMesh && child.material) {
+                        const materials = Array.isArray(child.material) ? child.material : [child.material];
+                        materials.forEach(mat => {
+                            if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial) {
+                                mat.metalness = 0.0;
+                                mat.roughness = 0.45;
+                                mat.envMapIntensity = 0.6;
+                            }
+                        });
+                    }
+                });
             }
 
             if (cap) { 
                 cap.userData.originalY = cap.position.y; 
-                cap.userData.originalRotX = cap.rotation.x; 
+                cap.userData.closedQuat = cap.quaternion.clone(); 
+                
+                const openQuat = cap.quaternion.clone();
+                if (index === 2) {
+                    openQuat.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -1.8)); 
+                } else {
+                    openQuat.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), 1.5)); 
+                }
+                cap.userData.openQuat = openQuat;
             }
+
+            const isCap = (child) => child === cap || child.parent === cap;
 
             let powderMesh = null;
             let labelMesh = null;
@@ -193,29 +251,19 @@ function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion, threeC
 
             if (index === 0) { 
                 model.traverse((child) => {
-                    if (child.isMesh) {
-                        if (child.name === 'Body' || child.name.includes('Mesh.008') || child.name.includes('Mesh_008') || (child.parent && child.parent.name === 'Body')) {
-                            if (Array.isArray(child.material)) {
-                                const matIdx = child.material.findIndex(m => !m.name.toLowerCase().includes('chrome'));
-                                if (matIdx !== -1) {
-                                    child.material = [...child.material];
-                                    child.material[matIdx] = new THREE.MeshStandardMaterial({
-                                        color: 0xffffff,
-                                        roughness: 0.9,
-                                        metalness: 0.1
-                                    });
-                                    child.userData.coloredMatIdx = matIdx;
-                                    labelMesh = child;
-                                    powderMesh = child; 
-                                }
-                            }
-                        }
-
-                        if (child.name === 'PowderMesh' || child.name.includes('mesh.086') || child.name.toLowerCase() === 'powder') {
+                    if (child.isMesh && !isCap(child)) {
+                        const name = child.name.toLowerCase();
+                        if (name === 'powdermesh' || name.includes('mesh.086') || name === 'powder') {
                             powderMesh = child;
-                            powderMesh.material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0.1 });
+                            powderMesh.material = new THREE.MeshStandardMaterial({ 
+                                color: 0xffffff, 
+                                roughness: 0.7, 
+                                metalness: 0.2,
+                                normalMap: texturesRef.current.sparkle,
+                                normalScale: new THREE.Vector2(0.8, 0.8)
+                            });
                         }
-                        if (child.name === 'label.011' || child.name.includes('label') || child.name.includes('mesh.085')) {
+                        if (name === 'label.011' || name.includes('label') || name.includes('mesh.085')) {
                             if (!labelMesh) {
                                 labelMesh = child;
                                 labelMesh.material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5, metalness: 0.1 });
@@ -227,7 +275,9 @@ function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion, threeC
 
             if (index === 1) {
                 model.traverse((child) => {
-                    if (child.isMesh) {
+                    if (child.isMesh && !isCap(child)) {
+                        const name = child.name.toLowerCase();
+
                         if (Array.isArray(child.material)) {
                             const matIdx = child.material.findIndex(m => {
                                 const mName = m.name.toLowerCase();
@@ -238,18 +288,18 @@ function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion, threeC
                                 child.material = [...child.material]; 
                                 child.material[matIdx] = new THREE.MeshStandardMaterial({
                                     color: new THREE.Color(SHADES[0].color),
-                                    roughness: 0.3,
-                                    metalness: 0.05
+                                    roughness: 0.85,
+                                    metalness: 0.0
                                 });
                                 child.userData.creamMatIdx = matIdx;
                                 creamMesh = child;
                             }
-                        } else if (child.name.includes('Cylinder.019') || child.name.toLowerCase().includes('cream')) {
+                        } else if (name.includes('cylinder.019') || name.includes('cream')) {
                             creamMesh = child;
                             creamMesh.material = new THREE.MeshStandardMaterial({
                                 color: new THREE.Color(SHADES[0].color),
-                                roughness: 0.3,
-                                metalness: 0.05
+                                roughness: 0.85,
+                                metalness: 0.0
                             });
                         }
                     }
@@ -260,7 +310,7 @@ function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion, threeC
             wrapper.userData.isOpen = false;
             wrapper.add(model);
             wrapper.scale.setScalar(0);
-            wrapper.position.y = -2;
+            wrapper.position.y = index === 0 ? -6 : (index === 1 ? 6 : 12); 
             group.add(wrapper);
             
             resolve({ index, wrapper, cap, powderMesh, labelMesh, creamMesh });
@@ -298,39 +348,27 @@ function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion, threeC
       const d = dragRef.current;
       const isMobile = window.innerWidth < 768;
 
-      let activeIndex = prog < 0.5 ? 0 : 1;
+      let activeIndex = prog < 0.33 ? 0 : prog < 0.66 ? 1 : 2;
 
       if (sceneRef.current?.products) {
           const currentShade = currentShadeRef.current;
 
           sceneRef.current.products.forEach((prod, i) => {
-              if (prod.labelMesh && prod.powderMesh && prod.labelMesh === prod.powderMesh) {
+              if (i === 0) {
+                  const targetPowderTex = texturesRef.current.powder[currentShade];
+                  if (prod.powderMesh && targetPowderTex && prod.powderMesh.material.map !== targetPowderTex) {
+                      prod.powderMesh.material.map = targetPowderTex;
+                      prod.powderMesh.material.needsUpdate = true;
+                  }
+
                   const targetLabelTex = texturesRef.current.label[currentShade];
-                  if (targetLabelTex) {
-                      if (prod.labelMesh.userData.coloredMatIdx !== undefined) {
-                          const mat = prod.labelMesh.material[prod.labelMesh.userData.coloredMatIdx];
-                          if (mat.map !== targetLabelTex) {
-                              mat.map = targetLabelTex;
-                              mat.color.setHex(0xffffff); 
-                              mat.needsUpdate = true;
-                          }
-                      } else if (prod.labelMesh.material.map !== targetLabelTex) {
-                          prod.labelMesh.material.map = targetLabelTex;
-                          prod.labelMesh.material.color.setHex(0xffffff);
-                          prod.labelMesh.material.needsUpdate = true;
-                      }
+                  if (prod.labelMesh && targetLabelTex && prod.labelMesh.material.map !== targetLabelTex) {
+                      prod.labelMesh.material.map = targetLabelTex;
+                      prod.labelMesh.material.needsUpdate = true;
                   }
-              } else {
-                  if (prod.powderMesh) {
-                      if (i === 0) {
-                          const targetPowderTex = texturesRef.current.powder[currentShade];
-                          if (targetPowderTex && prod.powderMesh.material.map !== targetPowderTex) {
-                              prod.powderMesh.material.map = targetPowderTex;
-                              prod.powderMesh.material.needsUpdate = true;
-                          }
-                      }
-                  }
-                  if (prod.creamMesh && i === 1) {
+
+              } else if (i === 1) {
+                  if (prod.creamMesh) {
                       const targetColor = new THREE.Color(SHADES[currentShade].color);
                       if (prod.creamMesh.userData.creamMatIdx !== undefined) {
                           const mat = prod.creamMesh.material[prod.creamMesh.userData.creamMatIdx];
@@ -345,13 +383,6 @@ function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion, threeC
                           }
                       }
                   }
-                  if (prod.labelMesh) {
-                      const targetLabelTex = texturesRef.current.label[currentShade];
-                      if (targetLabelTex && prod.labelMesh.material.map !== targetLabelTex) {
-                          prod.labelMesh.material.map = targetLabelTex;
-                          prod.labelMesh.material.needsUpdate = true;
-                      }
-                  }
               }
           });
       }
@@ -360,11 +391,13 @@ function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion, threeC
         d.rotOffsetX += d.velY; d.rotOffsetY += d.velX;
         d.velX *= 0.92; d.velY *= 0.92;
       }
-      d.rotOffsetX = Math.max(-0.35, Math.min(0.35, d.rotOffsetX));
+      
+      if (activeIndex === 0) {
+          d.rotOffsetX = Math.max(-0.25, Math.min(0.65, d.rotOffsetX));
+      }
 
-      // ── Responsive Camera & Position ──
       const targetX = isMobile ? 0 : -1.8; 
-      const targetCamZ = isMobile ? 6.5 : 5; // Pull camera back slightly on mobile
+      const targetCamZ = isMobile ? 6.5 : 5;
       const targetRimInt = 1.5;
       rimLight.color.setHSL(0.75, 0.9, 0.6);
 
@@ -377,19 +410,18 @@ function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion, threeC
         sceneRef.current.products.forEach((prod, i) => {
             const isActiveModel = (activeIndex === i);
             
-            // Adjust base scale for Mobile to perfectly frame the top half
-            const baseScale = (i === 0 ? 3.5 : 0.8) * (isMobile ? 0.8 : 1.0);
+            const baseScale = (i === 0 ? 2.5 : i === 1 ? 2.4 : 0.25) * (isMobile ? 0.8 : 1.0);
             
             let pTargetScale = isActiveModel ? baseScale : 0;
-            // Shift model UP on mobile so it sits cleanly above the white UI panel
-            let pTargetY = isActiveModel ? Math.sin(t * 0.8) * 0.08 + (isMobile ? 1.8 : 0) : -2;
+            let pTargetY = isActiveModel ? Math.sin(t * 0.8) * 0.08 + (isMobile ? 0.9 : 0) : (i === 0 ? -6 : i === 1 ? 6 : 12);
+            
             let capTargetY = prod.cap ? prod.cap.userData.originalY : 0;
-            let capTargetRotX = prod.cap ? prod.cap.userData.originalRotX : 0;
+            let targetQuat = prod.cap ? prod.cap.userData.closedQuat : null;
 
             if (prod.cap && prod.wrapper.userData.isOpen) {
                 if (i === 0) {
-                    capTargetRotX = prod.cap.userData.originalRotX - 1.5; 
-                } else if (i === 1) {
+                    targetQuat = prod.cap.userData.openQuat; 
+                } else if (i === 1 || i === 2) { 
                     capTargetY = prod.cap.userData.originalY + 2.5; 
                 }
             }
@@ -399,8 +431,8 @@ function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion, threeC
 
             if (prod.cap) {
                 prod.cap.position.y = THREE.MathUtils.lerp(prod.cap.position.y, capTargetY, lerpSpeed * 1.5);
-                if (i === 0) {
-                    prod.cap.rotation.x = THREE.MathUtils.lerp(prod.cap.rotation.x, capTargetRotX, lerpSpeed * 1.5);
+                if (i === 0 && targetQuat) { 
+                    prod.cap.quaternion.slerp(targetQuat, lerpSpeed * 1.5);
                 }
             }
         });
@@ -408,7 +440,7 @@ function useThreeScene(canvasRef, scrollProgress, dragRef, reducedMotion, threeC
 
       if (d.currentSpinOffset === undefined) d.currentSpinOffset = 0;
       d.currentSpinOffset = THREE.MathUtils.lerp(d.currentSpinOffset, 0, lerpSpeed);
-      group.rotation.y = t * 0.3 + d.currentSpinOffset + d.rotOffsetY;
+      group.rotation.y = THREE.MathUtils.lerp(group.rotation.y, d.rotOffsetY, lerpSpeed);
       group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, d.rotOffsetX, lerpSpeed);
 
       renderer.render(scene, camera);
@@ -453,7 +485,7 @@ export default function App() {
   const [reducedMotion] = useState(() => typeof window !== "undefined" ? window.matchMedia("(prefers-reduced-motion: reduce)").matches : false);
 
   const dragRef = useRef({
-    dragActive: false, lastX: 0, lastY: 0, rotOffsetX: 0, rotOffsetY: 0,
+    dragActive: false, lastX: 0, lastY: 0, rotOffsetX: 0.4, rotOffsetY: 0,
     velX: 0, velY: 0, lastTap: 0, tapStartX: 0, tapStartY: 0, tapStartTime: 0
   });
 
@@ -478,18 +510,36 @@ export default function App() {
       const max = container.scrollHeight - container.clientHeight;
       const prog = max > 0 ? container.scrollTop / max : 0;
       scrollProgress.current = prog;
-      setChapter(prog < 0.5 ? 0 : 1);
+      setChapter(prog < 0.33 ? 0 : prog < 0.66 ? 1 : 2);
     };
     container.addEventListener("scroll", onScroll, { passive: true });
     return () => container.removeEventListener("scroll", onScroll);
   }, []);
+
+  useEffect(() => {
+    if (dragRef.current) {
+        dragRef.current.rotOffsetX = chapter === 0 ? 0.4 : 0;
+        dragRef.current.rotOffsetY = 0;
+        dragRef.current.velX = 0;
+        dragRef.current.velY = 0;
+    }
+  }, [chapter]);
+
+  const handleResetPosition = () => {
+    if (dragRef.current) {
+        dragRef.current.rotOffsetX = chapter === 0 ? 0.4 : 0;
+        dragRef.current.rotOffsetY = 0;
+        dragRef.current.velX = 0;
+        dragRef.current.velY = 0;
+    }
+  };
 
   const handlePointerDown = (e) => {
     const d = dragRef.current;
     d.dragActive = true; d.lastX = e.clientX; d.lastY = e.clientY; d.velX = 0; d.velY = 0;
     d.tapStartX = e.clientX; d.tapStartY = e.clientY; d.tapStartTime = Date.now();
     if (interactRef.current) interactRef.current.setPointerCapture(e.pointerId);
-    if (Date.now() - d.lastTap < 300) { d.rotOffsetX = 0; d.rotOffsetY = 0; }
+    if (Date.now() - d.lastTap < 300) { d.rotOffsetX = chapter === 0 ? 0.4 : 0; d.rotOffsetY = 0; }
     d.lastTap = Date.now();
     setShowHint(false);
   };
@@ -514,7 +564,6 @@ export default function App() {
     if (interactRef.current) { try { interactRef.current.releasePointerCapture(e.pointerId); } catch (err) { } }
   };
 
-  // Swatch Component to perfectly match your screenshot
   const RenderSwatches = () => (
     <div style={{ display: "flex", justifyContent: "flex-start", gap: 10, marginBottom: 32, flexWrap: "wrap" }}>
       {SHADES.map((swatch, idx) => {
@@ -554,7 +603,6 @@ export default function App() {
   return (
     <div style={{ width: "100%", height: "100vh", background: "#f8fafc", fontFamily: "'Segoe UI', system-ui, sans-serif", overflow: "hidden", position: "relative" }}>
       
-      {/* ── LOADING OVERLAY ── */}
       <div style={{
         position: 'absolute', inset: 0, zIndex: 100, background: '#ffffff',
         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
@@ -568,22 +616,37 @@ export default function App() {
         <div style={{ fontSize: 10, marginTop: 12, letterSpacing: 2, color: '#64748b', fontWeight: 600 }}>{loadProgress}%</div>
       </div>
 
-      {/* ── SCROLL CONTAINER ── */}
       <div ref={scrollRef} style={{ position: "absolute", inset: 0, overflowY: "auto", overflowX: "hidden", zIndex: 10, pointerEvents: "auto", WebkitOverflowScrolling: "touch" }}>
         <div ref={interactRef} style={{ position: "sticky", top: 0, left: 0, width: "100%", height: "100vh", zIndex: 15, touchAction: "pan-y" }} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} />
-        <div style={{ height: "200vh", pointerEvents: "none" }} />
+        <div style={{ height: "300vh", pointerEvents: "none" }} />
       </div>
 
       <canvas ref={canvasRef} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", zIndex: 1, pointerEvents: "none" }} />
 
-      {/* Helper Interaction Hint */}
       <div style={{ position: "absolute", top: "45%", left: "50%", transform: "translate(-50%, -50%)", opacity: showHint && !isMobile && !isLoading ? 1 : 0, transition: "opacity 0.8s ease", pointerEvents: "none", zIndex: 30 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.9)', padding: '8px 16px', borderRadius: 20, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
           <span style={{ fontSize: 16 }}>⟷👆</span><span style={{ fontSize: 11, fontWeight: 700, color: '#111827', letterSpacing: 1 }}>DRAG OR TAP</span>
         </div>
       </div>
 
-      {/* ── CHAPTER 0: Shimmer Blush Powder ── */}
+      <div style={{ position: "absolute", top: isMobile ? "35%" : "45%", left: isMobile ? "20px" : "10vw", zIndex: 40, opacity: isLoading ? 0 : 1, transition: "opacity 0.8s ease 0.4s" }}>
+        <button 
+            onClick={handleResetPosition}
+            style={{ 
+                background: "rgba(255,255,255,0.9)", border: "none", padding: "8px 16px", 
+                borderRadius: "20px", boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+                fontSize: "11px", fontWeight: "700", letterSpacing: "1px", color: "#111",
+                cursor: "pointer", pointerEvents: "auto", transition: "transform 0.2s ease"
+            }}
+            onMouseDown={(e) => e.currentTarget.style.transform = "scale(0.95)"}
+            onMouseUp={(e) => e.currentTarget.style.transform = "scale(1)"}
+            onMouseLeave={(e) => e.currentTarget.style.transform = "scale(1)"}
+        >
+            ↺ RESET
+        </button>
+      </div>
+
+      {/* SECTION 1 */}
       <div style={{
         position: "absolute",
         inset: isMobile ? "auto 0 0 0" : "0 0 0 0",
@@ -625,7 +688,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* ── CHAPTER 1: Creamy Blush Stick ── */}
+      {/* SECTION 2 */}
       <div style={{
         position: "absolute",
         inset: isMobile ? "auto 0 0 0" : "0 0 0 0",
@@ -660,6 +723,45 @@ export default function App() {
           <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 16, letterSpacing: 1, textTransform: "uppercase" }}>SHADE: {SHADES[activeShade].name}</div>
           
           <RenderSwatches />
+
+          <button style={{ width: "100%", padding: "20px", background: "#000", color: "#fff", border: "none", fontSize: 13, fontWeight: 700, letterSpacing: 2, display: "flex", justifyContent: "center", alignItems: "center", gap: 12, cursor: "pointer", borderRadius: 2 }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path></svg> ADD TO CART
+          </button>
+        </div>
+      </div>
+
+      {/* SECTION 3 */}
+      <div style={{
+        position: "absolute",
+        inset: isMobile ? "auto 0 0 0" : "0 0 0 0",
+        height: isMobile ? "55vh" : "100%",
+        display: "flex", flexDirection: "column",
+        justifyContent: isMobile ? "flex-start" : "center", alignItems: isMobile ? "center" : "flex-end", 
+        paddingRight: isMobile ? 0 : "10vw",
+        padding: isMobile ? "32px 24px 24px 24px" : "0 10vw 0 0",
+        background: isMobile ? "#ffffff" : "transparent",
+        zIndex: 20, 
+        pointerEvents: "none", 
+        opacity: chapter === 2 && !isLoading ? 1 : 0, 
+        transform: !isLoading ? (chapter === 2 ? "translateY(0)" : "translateY(24px)") : "translateY(24px)", 
+        transition: "opacity 0.7s ease, transform 0.7s ease"
+      }}>
+        <div style={{ 
+          width: "100%", maxWidth: isMobile ? "100%" : "420px", color: "#111", textAlign: "left", fontFamily: "'Century Gothic', 'Helvetica Neue', sans-serif",
+          pointerEvents: chapter === 2 && !isLoading ? "auto" : "none",
+        }}>
+          <h1 style={{ fontSize: 24, fontWeight: 300, margin: "0 0 16px", letterSpacing: 0.5, color: "#111827" }}>BARE Invisible Sunscreen</h1>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 12, marginBottom: 12 }}>
+            <span style={{ background: "#000", color: "#fff", fontSize: 10, fontWeight: 700, padding: "6px 10px", letterSpacing: 1 }}>ESSENTIAL</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 8, marginBottom: 12 }}>
+            <span style={{ fontSize: 14, letterSpacing: 2 }}>★★★★★</span> <span style={{ fontSize: 12, color: "#64748b", textDecoration: "underline" }}>(45) Rate</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 16 }}>
+            <span style={{ color: "#10b981", fontSize: 16 }}>●</span><span style={{ color: "#10b981", fontSize: 12, fontWeight: 700, letterSpacing: 1 }}>IN STOCK</span>
+          </div>
+          <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 24 }}>$18.00</div>
+          <hr style={{ border: "none", borderTop: "1px solid #e2e8f0", margin: "0 0 24px" }} />
 
           <button style={{ width: "100%", padding: "20px", background: "#000", color: "#fff", border: "none", fontSize: 13, fontWeight: 700, letterSpacing: 2, display: "flex", justifyContent: "center", alignItems: "center", gap: 12, cursor: "pointer", borderRadius: 2 }}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path></svg> ADD TO CART
